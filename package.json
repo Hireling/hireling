@@ -1,0 +1,16 @@
+{
+  "name": "hireling",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Hireling/hireling.git"
+  },
+  "author": "Alex Soncodi",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Hireling/hireling/issues"
+  },
+  "homepage": "https://github.com/Hireling/hireling#readme"
+}
