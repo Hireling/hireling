@@ -11,4 +11,4 @@ cp \
   ./LICENSE \
   ./build/package
 
-sed -i 's/"private": true/"private": false/g' ./build/package/package.json
+sed -i 's/"private": true/"private": false/' ./build/package/package.json
