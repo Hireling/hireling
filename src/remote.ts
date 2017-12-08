@@ -4,6 +4,7 @@ import * as M from './message';
 import { WorkerId } from './worker';
 import { Serializer } from './serializer';
 import { Job } from './job';
+import { NoopHandler } from './util';
 
 export const enum RemoteEvent {
   meta     = 'meta',
@@ -17,9 +18,19 @@ export const enum RemoteEvent {
   finish   = 'finish',
 }
 
+// tslint:disable:unified-signatures
 export declare interface Remote {
-  on(event: RemoteEvent, fn: (...args: any[]) => void): this;
+  on(e: RemoteEvent.meta|'meta', fn: NoopHandler): this;
+  on(e: RemoteEvent.ping|'ping', fn: NoopHandler): this;
+  on(e: RemoteEvent.pong|'pong', fn: NoopHandler): this;
+  on(e: RemoteEvent.ready|'ready', fn: NoopHandler): this;
+  on(e: RemoteEvent.resume|'resume', fn: NoopHandler): this;
+  on(e: RemoteEvent.replay|'replay', fn: NoopHandler): this;
+  on(e: RemoteEvent.start|'start', fn: NoopHandler): this;
+  on(e: RemoteEvent.progress|'progress', fn: NoopHandler): this;
+  on(e: RemoteEvent.finish|'finish', fn: NoopHandler): this;
 }
+// tslint:enable:unified-signatures
 
 // broker's view of a remote worker and socket
 export class Remote extends EventEmitter {

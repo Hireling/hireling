@@ -2,15 +2,19 @@ import { EventEmitter } from 'events';
 import { JobAttr, JobStatus, JobId } from './job';
 import { WorkerId } from './worker';
 import { Logger, LogLevel } from './logger';
+import { NoopHandler } from './util';
 
 export const enum DbEvent {
   open  = 'open',
   close = 'close'
 }
 
+// tslint:disable:unified-signatures
 export declare interface Db {
-  on(event: DbEvent, fn: (...args: any[]) => void): this;
+  on(e: DbEvent.open|'open', fn: NoopHandler): this;
+  on(e: DbEvent.close|'close', fn: NoopHandler): this;
 }
+// tslint:enable:unified-signatures
 
 export abstract class Db extends EventEmitter {
   protected readonly log = new Logger(Db.name);

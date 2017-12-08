@@ -5,7 +5,7 @@ import * as M from './message';
 import { Serializer } from './serializer';
 import { Logger, LogLevel } from './logger';
 import { JobAttr, JobData, JobStrategy } from './job';
-import { spinlock, mergeOpt } from './util';
+import { spinlock, mergeOpt, NoopHandler } from './util';
 
 export interface JobHandle {
   meta:     JobAttr;
@@ -13,7 +13,7 @@ export interface JobHandle {
   progress: (progress: number) => void;
 }
 
-export enum _WorkerId {}
+export const enum _WorkerId {}
 export type WorkerId = _WorkerId & string; // pseudo nominal typing
 
 export type JobResult = any;
@@ -42,9 +42,15 @@ export const enum WorkerEvent {
   jobfinish   = 'jobfinish'
 }
 
+// tslint:disable:unified-signatures
 export declare interface Worker {
-  on(event: WorkerEvent, fn: (...args: any[]) => void): this;
+  on(e: WorkerEvent.start|'start', fn: NoopHandler): this;
+  on(e: WorkerEvent.stop|'stop', fn: NoopHandler): this;
+  on(e: WorkerEvent.jobstart|'jobstart', fn: NoopHandler): this;
+  on(e: WorkerEvent.jobprogress|'jobprogress', fn: NoopHandler): this;
+  on(e: WorkerEvent.jobfinish|'jobfinish', fn: NoopHandler): this;
 }
+// tslint:enable:unified-signatures
 
 export class Worker extends EventEmitter {
   readonly id: WorkerId;

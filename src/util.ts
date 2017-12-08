@@ -7,6 +7,9 @@ export type TopPartial<T> = {
   [P in keyof T]?: Partial<T[P]>;
 };
 
+// TODO: remove this
+export type NoopHandler = (...args: any[]) => void;
+
 // merge options recursively, ignore undefined keys
 export function mergeOpt(tgt: object = {}, src: object = {}) {
   const def = { ...tgt };

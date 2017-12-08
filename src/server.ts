@@ -3,7 +3,7 @@ import * as WS from 'ws';
 import * as M from './message';
 import { Serializer } from './serializer';
 import { Logger, LogLevel } from './logger';
-import { TopPartial, mergeOpt } from './util';
+import { TopPartial, mergeOpt, NoopHandler } from './util';
 import { Remote, RemoteEvent } from './remote';
 
 export const SERVER_DEFS = {
@@ -22,9 +22,15 @@ export const enum ServerEvent {
   workerdisconnect = 'workerdisconnect'
 }
 
+// tslint:disable:unified-signatures
 export declare interface Server {
-  on(event: ServerEvent, fn: (...args: any[]) => void): this;
+  on(e: ServerEvent.start|'start', fn: NoopHandler): this;
+  on(e: ServerEvent.stop|'stop', fn: NoopHandler): this;
+  on(e: ServerEvent.error|'error', fn: NoopHandler): this;
+  on(e: ServerEvent.workerconnect|'workerconnect', fn: NoopHandler): this;
+  on(e: ServerEvent.workerdisconnect|'workerdisconnect', fn: NoopHandler): this;
 }
+// tslint:enable:unified-signatures
 
 export class Server extends EventEmitter {
   private server: WS.Server;

@@ -6,7 +6,7 @@ import { Logger, LogLevel } from './logger';
 import {
   Job, JobStatus, JobMeta, JobData, JobEvent, JobAttr, JobStrategy, JobId
 } from './job';
-import { spinlock, TopPartial, mergeOpt } from './util';
+import { spinlock, TopPartial, mergeOpt, NoopHandler } from './util';
 import { Db, DbEvent, MemoryEngine } from './db';
 import { Server, ServerEvent, SERVER_DEFS } from './server';
 import { Remote, RemoteEvent } from './remote';
@@ -56,9 +56,17 @@ export const enum BrokerEvent {
   drain      = 'drain'       // queue drained, no jobs remain
 }
 
+// tslint:disable:unified-signatures
 export declare interface Broker {
-  on(event: BrokerEvent, fn: (...args: any[]) => void): this;
+  on(e: BrokerEvent.start|'start', fn: NoopHandler): this;
+  on(e: BrokerEvent.stop|'stop', fn: NoopHandler): this;
+  on(e: BrokerEvent.error|'error', fn: NoopHandler): this;
+  on(e: BrokerEvent.workerjoin|'workerjoin', fn: NoopHandler): this;
+  on(e: BrokerEvent.workerpart|'workerpart', fn: NoopHandler): this;
+  on(e: BrokerEvent.jobdone|'jobdone', fn: NoopHandler): this;
+  on(e: BrokerEvent.drain|'drain', fn: NoopHandler): this;
 }
+// tslint:enable:unified-signatures
 
 export class Broker extends EventEmitter {
   private server: Server;

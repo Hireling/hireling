@@ -1,7 +1,8 @@
 import { EventEmitter } from 'events';
 import { WorkerId } from './worker';
+import { NoopHandler } from './util';
 
-export enum _JobId {}
+export const enum _JobId {}
 export type JobId = _JobId & string; // pseudo nominal typing
 
 export type JobStatus = 'ready'|'processing'|'done'|'failed';
@@ -33,9 +34,14 @@ export const enum JobEvent {
   fail     = 'fail'
 }
 
+// tslint:disable:unified-signatures
 export declare interface Job {
-  on(event: JobEvent, fn: (...args: any[]) => void): this;
+  on(e: JobEvent.start|'start', fn: NoopHandler): this;
+  on(e: JobEvent.progress|'progress', fn: NoopHandler): this;
+  on(e: JobEvent.done|'done', fn: NoopHandler): this;
+  on(e: JobEvent.fail|'fail', fn: NoopHandler): this;
 }
+// tslint:enable:unified-signatures
 
 export class Job extends EventEmitter implements JobAttr {
   readonly id: JobId;
