@@ -66,6 +66,7 @@ export declare interface Broker {
   on(e: BrokerEvent.workerjoin|'workerjoin', fn: NoopHandler): this;
   on(e: BrokerEvent.workerpart|'workerpart', fn: NoopHandler): this;
   on(e: BrokerEvent.jobdone|'jobdone', fn: NoopHandler): this;
+  on(e: BrokerEvent.full|'full', fn: NoopHandler): this;
   on(e: BrokerEvent.drain|'drain', fn: NoopHandler): this;
 }
 // tslint:enable:unified-signatures
