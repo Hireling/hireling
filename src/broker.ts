@@ -34,6 +34,7 @@ export const BROKER_DEFS = {
   waitms:  500,
   gc:      GC_DEFS as typeof GC_DEFS|null,
   reapms:  5000,
+  manual:  false, // manual job flow control
   server:  SERVER_DEFS,
   db:      {
     log:     LogLevel.warn,
@@ -53,6 +54,7 @@ export const enum BrokerEvent {
   workerjoin = 'workerjoin',
   workerpart = 'workerpart',
   jobdone    = 'jobdone',
+  full       = 'full',       // all workers busy
   drain      = 'drain'       // queue drained, no jobs remain
 }
 
@@ -231,6 +233,9 @@ export class Broker extends EventEmitter {
         worker.locked = false;
       }
       else {
+        this.event(BrokerEvent.full);
+        this.log.info('no workers available for assignment');
+
         // no worker available, assign job later
         job = await this.addJob(opt, null, 'ready');
       }
@@ -247,6 +252,42 @@ export class Broker extends EventEmitter {
     this.log.debug(`added job ${job.id} (${job.status})`);
 
     return job;
+  }
+
+  async tryAssignJob() {
+    if (this.closing) {
+      this.log.warn('skip job assign: broker is closing');
+      return false;
+    }
+    else if (!this.serveropen || !this.dbopen) {
+      this.log.warn('skip job assign: broker is not ready');
+      return false;
+    }
+
+    const worker = this.workers.find(w => !w.job && !w.locked && !w.closing);
+
+    if (!worker) {
+      this.event(BrokerEvent.full);
+      this.log.info('no workers available for assignment');
+      return false;
+    }
+
+    let assigned = false;
+
+    worker.locked = true;
+
+    const job = await this.reserveJob(worker);
+
+    if (job) {
+      assigned = await this.assignJob(worker, job);
+    }
+    else {
+      this.event(BrokerEvent.drain);
+    }
+
+    worker.locked = false;
+
+    return assigned;
   }
 
   async clearJobs() {
@@ -638,8 +679,8 @@ export class Broker extends EventEmitter {
 
       await worker.sendMsg(M.Code.readyok, readyOkMsg);
 
-      if (!(await this.tryAssignNextJob())) {
-        this.event(BrokerEvent.drain);
+      if (!this.opt.manual) {
+        await this.tryAssignJob();
       }
     });
 
@@ -682,42 +723,10 @@ export class Broker extends EventEmitter {
 
       worker.job = null; // release worker even if update failed
 
-      if (!(await this.tryAssignNextJob())) {
-        this.event(BrokerEvent.drain);
+      if (!this.opt.manual) {
+        await this.tryAssignJob();
       }
     });
-  }
-
-  private async tryAssignNextJob() {
-    if (this.closing) {
-      this.log.warn('skip job assign: broker is closing');
-      return false;
-    }
-    else if (!this.serveropen || !this.dbopen) {
-      this.log.warn('skip job assign: broker is not ready');
-      return false;
-    }
-
-    const worker = this.workers.find(w => !w.job && !w.locked && !w.closing);
-
-    if (!worker) {
-      this.log.info('no workers available for assignment');
-      return false;
-    }
-
-    let assigned = false;
-
-    worker.locked = true;
-
-    const job = await this.reserveJob(worker);
-
-    if (job) {
-      assigned = await this.assignJob(worker, job);
-    }
-
-    worker.locked = false;
-
-    return assigned;
   }
 
   private async assignJob(worker: Remote, job: Job) {
