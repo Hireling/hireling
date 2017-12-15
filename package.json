@@ -1,6 +1,6 @@
 {
   "name": "hireling",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Modern, poll-free, multi-server task queue over WebSockets.",
   "repository": {
     "type": "git",
