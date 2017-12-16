@@ -10,7 +10,7 @@ import { brokerCfg, workerCfg } from './cfg.test';
 let broker: Broker;
 let worker: Worker;
 
-const echoWork: JobContext = async (job) => job.data;
+const echoWork: JobContext = async jh => jh.job.data;
 
 @TestFixture()
 export class BrokerTest {
@@ -266,8 +266,8 @@ export class BrokerTest {
 
     job.on(JobEvent.progress, spy.onProgress);
 
-    worker = new Worker(workerCfg, async (job) => {
-      job.progress(10);
+    worker = new Worker(workerCfg, async (jh) => {
+      jh.progress(10);
     }).start();
 
     await ewait(job, JobEvent.done);

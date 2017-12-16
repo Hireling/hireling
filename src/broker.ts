@@ -1,11 +1,9 @@
 import { EventEmitter } from 'events';
 import * as uuid from 'uuid';
 import * as M from './message';
-import { WorkerId } from './worker';
+import { WorkerId, ExecStrategy, ResumeData } from './worker';
 import { Logger, LogLevel } from './logger';
-import {
-  Job, JobStatus, JobMeta, JobData, JobEvent, JobAttr, JobStrategy, JobId
-} from './job';
+import { Job, JobStatus, JobEvent, JobAttr, JobId } from './job';
 import { spinlock, TopPartial, mergeOpt, NoopHandler } from './util';
 import { Db, DbEvent, MemoryEngine } from './db';
 import { Server, ServerEvent, SERVER_DEFS } from './server';
@@ -15,7 +13,7 @@ export interface JobCreate<T = any> {
   name?:     string;
   expirems?: number; // max life in ms from time of creation
   stallms?:  number; // max time interval in ms between worker updates
-  data?:     JobData<T>;
+  data?:     T;
 }
 
 interface Replay {
@@ -225,7 +223,7 @@ export class Broker extends EventEmitter {
         // lock available worker, assign job now
         worker.locked = true;
 
-        job = await this.addJob(opt, worker.id, 'processing');
+        job = await this.addJob(opt, 'processing', worker.id);
 
         if (job) {
           await this.assignJob(worker, job);
@@ -238,19 +236,19 @@ export class Broker extends EventEmitter {
         this.log.info('no workers available for assignment');
 
         // no worker available, assign job later
-        job = await this.addJob(opt, null, 'ready');
+        job = await this.addJob(opt, 'ready', null);
       }
     }
     else {
       // socket server down, assign job later
-      job = await this.addJob(opt, null, 'ready');
+      job = await this.addJob(opt, 'ready', null);
     }
 
     if (!job) {
       throw new Error('could not create job');
     }
 
-    this.log.debug(`added job ${job.id} (${job.status})`);
+    this.log.debug(`added job ${job.attr.id} (${job.attr.status})`);
 
     return job;
   }
@@ -305,13 +303,13 @@ export class Broker extends EventEmitter {
         // replay job finished more than once
         this.log.warn('replay job missing (reaper)', data.jobid);
       }
-      else if (job.workerid != workerid) {
+      else if (job.attr.workerid != workerid) {
         this.log.error('replay job reassigned (reaper)', data.jobid);
 
         // TODO: cancel/abort replay job double still ongoing
       }
       else {
-        return this.finishJob(job.workerid, job, data);
+        return this.finishJob(job.attr.workerid, job, data);
       }
     }
     catch (err) {
@@ -325,20 +323,20 @@ export class Broker extends EventEmitter {
     return true;
   }
 
-  private async tryResume(worker: Remote, meta: JobMeta) {
-    let strategy: JobStrategy;
+  private async tryResume(worker: Remote, resume: ResumeData) {
+    let strategy: ExecStrategy;
 
     try {
-      const job = await this.getJobById(meta.id);
+      const job = await this.getJobById(resume.id);
 
       if (!job) {
         // resume job already picked up by reaper and completed
-        this.log.error('resume job missing (reaper)', meta.id);
+        this.log.error('resume job missing (reaper)', resume.id);
 
         strategy = 'execquiet';
       }
-      else if (job.workerid != worker.id) {
-        this.log.error('resume job reassigned (reaper)', meta.id);
+      else if (job.attr.workerid != worker.id) {
+        this.log.error('resume job reassigned (reaper)', resume.id);
 
         // TODO: cancel/abort ongoing job executing again concurrently
 
@@ -348,7 +346,7 @@ export class Broker extends EventEmitter {
         // re-associate with original worker
         worker.job = job;
 
-        this.log.warn('job resumed', meta.id);
+        this.log.warn('job resumed', resume.id);
 
         strategy = 'exec';
       }
@@ -650,7 +648,7 @@ export class Broker extends EventEmitter {
     });
 
     worker.on(RemoteEvent.ready, async (msg: M.Ready) => {
-      let strategy: JobStrategy;
+      let strategy: ExecStrategy;
 
       if (msg.replay) {
         await this.tryReplay({
@@ -700,10 +698,10 @@ export class Broker extends EventEmitter {
         return;
       }
 
-      if (worker.job.stallms) {
+      if (worker.job.attr.stallms) {
         try {
           await this.db.updateById(msg.jobid, {
-            stalls: new Date(Date.now() + worker.job.stallms)
+            stalls: new Date(Date.now() + worker.job.attr.stallms)
           });
         }
         catch (err) {
@@ -749,13 +747,13 @@ export class Broker extends EventEmitter {
     }
 
     const add: M.Add = {
-      job: Job.toJobAttr(job)
+      job: job.attr
     };
 
     if (!(await worker.sendMsg(M.Code.add, add))) {
       this.log.warn('rolling back job assignment');
 
-      if (!(await this.updateJob(job, 'ready'))) {
+      if (!(await this.updateJob(job.attr, 'ready'))) {
         // job stalled, will be resolved by reaper
         this.log.error('could not roll back job assignment');
       }
@@ -765,14 +763,14 @@ export class Broker extends EventEmitter {
 
     worker.job = job;
 
-    this.log.debug(`assigned job ${job.name} => ${worker.name}`);
+    this.log.debug(`assigned job ${job.attr.name} => ${worker.name}`);
 
     return true;
   }
 
   private async finishJob(wId: WorkerId, job: Job, msg: M.Finish) {
-    if (await this.updateJob(job, msg.status)) {
-      this.log.warn(`job ${job.name} finished`);
+    if (await this.updateJob(job.attr, msg.status)) {
+      this.log.warn(`job ${job.attr.name} finished`);
 
       this.event(BrokerEvent.jobdone);
 
@@ -798,15 +796,15 @@ export class Broker extends EventEmitter {
     const job = new Job(j);
 
     // store job handle with client-attached events
-    this.jobs.set(job.id, job);
+    this.jobs.set(job.attr.id, job);
 
     return job;
   }
 
-  private removeJobHandle(job: Job) {
-    this.jobs.delete(job.id);
+  private removeJobHandle(id: JobId) {
+    this.jobs.delete(id);
 
-    this.log.debug('freed job handle', job.id, this.jobs.size);
+    this.log.debug('freed job handle', id, this.jobs.size);
   }
 
   private async getJobById(id: JobId) {
@@ -834,7 +832,7 @@ export class Broker extends EventEmitter {
 
       if (job) {
         // update in-memory status to match update
-        job.status = 'processing';
+        job.attr.status = 'processing';
       }
 
       return job || this.addJobHandle(j);
@@ -846,7 +844,7 @@ export class Broker extends EventEmitter {
     }
   }
 
-  private async addJob(opt: JobCreate, wId: WorkerId|null, status: JobStatus) {
+  private async addJob(opt: JobCreate, status: JobStatus, wId: WorkerId|null) {
     const id = uuid.v4() as JobId;
     const now = Date.now();
 
@@ -865,29 +863,29 @@ export class Broker extends EventEmitter {
     });
 
     try {
-      await this.db.add(Job.toJobAttr(job));
+      await this.db.add(job.attr);
 
       return job;
     }
     catch (err) {
       this.log.error('error saving job', err);
 
-      this.removeJobHandle(job); // cleanup
+      this.removeJobHandle(job.attr.id); // cleanup
 
       return null;
     }
   }
 
-  private async updateJob(job: Job, newStatus: JobStatus) {
-    this.log.info(`update job ${job.name} ${job.status} => ${newStatus}`);
+  private async updateJob(j: JobAttr, newStatus: JobStatus) {
+    this.log.info(`update job ${j.name} ${j.status} => ${newStatus}`);
 
-    if (job.status === newStatus) {
+    if (j.status === newStatus) {
       this.log.error('job status is the same');
       return false;
     }
 
     try {
-      await this.db.updateById(job.id, { status: newStatus });
+      await this.db.updateById(j.id, { status: newStatus });
     }
     catch (err) {
       this.log.error('error updating job', err);
@@ -895,13 +893,13 @@ export class Broker extends EventEmitter {
     }
 
     // update in-memory status to match update
-    job.status = newStatus;
+    j.status = newStatus;
 
-    if (job.status === 'done') {
-      this.removeJobHandle(job);
+    if (j.status === 'done') {
+      this.removeJobHandle(j.id);
 
       if (this.opt.gc && this.opt.gc.interval === 0) {
-        this.gcById(job.id);
+        this.gcById(j.id);
       }
     }
 

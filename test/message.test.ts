@@ -40,7 +40,7 @@ const nanData = {
   a: NaN
 };
 
-const echoWork: JobContext = async (job) => job.data;
+const echoWork: JobContext = async jh => jh.job.data;
 
 @TestFixture()
 export class MessageTest {

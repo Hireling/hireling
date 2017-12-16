@@ -4,20 +4,24 @@ import * as WS from 'ws';
 import * as M from './message';
 import { Serializer } from './serializer';
 import { Logger, LogLevel } from './logger';
-import { JobAttr, JobMeta, JobData, JobStrategy } from './job';
+import { JobId, JobAttr } from './job';
 import { spinlock, mergeOpt, NoopHandler } from './util';
 
 export interface JobHandle<T = any> {
-  meta:     JobMeta;
-  data:     JobData<T>;
+  job:      JobAttr<T>;
   progress: (progress: number) => void;
 }
 
 export const enum _WorkerId {}
 export type WorkerId = _WorkerId & string; // pseudo nominal typing
 
-export type JobResult = any;
-export type JobContext = (job: JobHandle) => Promise<JobResult>;
+export interface ResumeData {
+  id: JobId
+}
+
+export type ExecStrategy = 'exec'|'execquiet'; // TODO: cancel, abort
+
+export type JobContext = (job: JobHandle) => Promise<any>;
 
 const noopjob: JobContext = async () => {};
 
@@ -65,7 +69,7 @@ export class Worker extends EventEmitter {
   private job: JobAttr|null = null;
   private resuming = false;
   private replay: M.Finish|null = null;   // sent on ready
-  private strategy: JobStrategy = 'exec'; // handling strategy for current job
+  private strategy: ExecStrategy = 'exec'; // handling strategy for current job
   private readonly opt: WorkerOpt;
   private readonly log = new Logger(Worker.name);
 
@@ -202,18 +206,7 @@ export class Worker extends EventEmitter {
         id:     this.id,
         name:   this.name,
         replay: this.replay,
-        resume: this.job ? {
-          id:       this.job.id,
-          workerid: this.id,
-          name:     this.job.name,
-          created:  this.job.created,
-          expires:  this.job.expires,
-          expirems: this.job.expirems,
-          stalls:   this.job.stalls,
-          stallms:  this.job.stallms,
-          status:   this.job.status,
-          attempts: this.job.attempts
-        } : null
+        resume: this.job ? { id: this.job.id } : null
       };
 
       if (await this.sendMsg(M.Code.ready, data)) {
@@ -288,8 +281,7 @@ export class Worker extends EventEmitter {
     try {
       // execute and forward progress events
       const result = await this.ctx({
-        meta: job,
-        data: job.data,
+        job,
         progress: async (progress) => {
           const prog: M.Progress = { jobid: job.id, progress };
 

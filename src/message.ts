@@ -1,5 +1,5 @@
-import { JobStatus, JobMeta, JobAttr, JobStrategy, JobId } from './job';
-import { WorkerId } from './worker';
+import { JobStatus, JobAttr, JobId } from './job';
+import { WorkerId, ExecStrategy, ResumeData } from './worker';
 
 export const enum Code {
   // common
@@ -33,14 +33,14 @@ export interface Add extends Data {
 }
 
 export interface ReadyOk extends Data {
-  readonly strategy: JobStrategy; // follow-up instructions from broker
+  readonly strategy: ExecStrategy; // follow-up instructions from broker
 }
 
 export interface Ready extends Data {
   readonly id:      WorkerId;
   readonly name:    string;
-  readonly replay?: Finish|null;  // job result if finished while disconnected
-  readonly resume?: JobMeta|null; // request to resume active job
+  readonly replay?: Finish|null;     // result if finished while disconnected
+  readonly resume?: ResumeData|null; // request to resume active job
 }
 
 export interface Start extends Data {
