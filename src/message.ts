@@ -25,10 +25,12 @@ export interface Msg {
   readonly closing?: boolean;
 }
 
-// data bodies
+// payload
 export interface Data {}
 
-export interface Add extends Data, JobAttr {}
+export interface Add extends Data {
+  readonly job: JobAttr;
+}
 
 export interface ReadyOk extends Data {
   readonly strategy: JobStrategy; // follow-up instructions from broker

@@ -6,7 +6,7 @@ export const enum _JobId {}
 export type JobId = _JobId & string; // pseudo nominal typing
 
 export type JobStatus = 'ready'|'processing'|'done'|'failed';
-export type JobData = object; // user-supplied data
+export type JobData<T> = T; // user-supplied data
 
 export interface JobMeta {
   id:       JobId;
@@ -21,8 +21,8 @@ export interface JobMeta {
   attempts: number;
 }
 
-export interface JobAttr extends JobMeta {
-  data: JobData;
+export interface JobAttr<T = any> extends JobMeta {
+  data: JobData<T>;
 }
 
 export type JobStrategy = 'exec'|'execquiet'; // TODO: cancel, abort
@@ -35,7 +35,7 @@ export const enum JobEvent {
 }
 
 // tslint:disable:unified-signatures
-export declare interface Job {
+export declare interface Job<T> {
   on(e: JobEvent.start|'start', fn: NoopHandler): this;
   on(e: JobEvent.progress|'progress', fn: NoopHandler): this;
   on(e: JobEvent.done|'done', fn: NoopHandler): this;
@@ -43,7 +43,7 @@ export declare interface Job {
 }
 // tslint:enable:unified-signatures
 
-export class Job extends EventEmitter implements JobAttr {
+export class Job<T = any> extends EventEmitter implements JobAttr<T> {
   readonly id: JobId;
   readonly workerid: WorkerId|null;
   readonly name: string;
@@ -54,15 +54,15 @@ export class Job extends EventEmitter implements JobAttr {
   readonly stallms: number|null;
   status: JobStatus;
   attempts: number;
-  readonly data: JobData;
+  readonly data: JobData<T>;
 
-  constructor(vals: JobAttr) {
+  constructor(vals: JobAttr<T>) {
     super();
 
     Object.assign(this, vals);
   }
 
-  static toJobAttr(job: Job): JobAttr {
+  static toJobAttr<TAttr>(job: Job<TAttr>): JobAttr<TAttr> {
     return {
       id:       job.id,
       workerid: job.workerid,

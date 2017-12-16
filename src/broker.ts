@@ -11,11 +11,11 @@ import { Db, DbEvent, MemoryEngine } from './db';
 import { Server, ServerEvent, SERVER_DEFS } from './server';
 import { Remote, RemoteEvent } from './remote';
 
-export interface JobCreate {
+export interface JobCreate<T = any> {
   name?:     string;
   expirems?: number; // max life in ms from time of creation
   stallms?:  number; // max time interval in ms between worker updates
-  data?:     JobData;
+  data?:     JobData<T>;
 }
 
 interface Replay {
@@ -208,7 +208,7 @@ export class Broker extends EventEmitter {
     );
   }
 
-  async createJob(opt: JobCreate = {}) {
+  async createJob<T>(opt: JobCreate<T> = {}) {
     if (this.closing) {
       throw new Error('broker is closing');
     }
@@ -216,7 +216,7 @@ export class Broker extends EventEmitter {
       throw new Error('broker is not ready');
     }
 
-    let job: Job|null;
+    let job: Job<T>|null;
 
     if (this.serveropen) {
       const worker = this.workers.find(w => !w.job && !w.locked && !w.closing);
@@ -676,9 +676,9 @@ export class Broker extends EventEmitter {
 
       this.event(BrokerEvent.workerjoin);
 
-      const readyOkMsg: M.ReadyOk = { strategy };
+      const readyOk: M.ReadyOk = { strategy };
 
-      await worker.sendMsg(M.Code.readyok, readyOkMsg);
+      await worker.sendMsg(M.Code.readyok, readyOk);
 
       if (!this.opt.manual) {
         await this.tryAssignJob();
@@ -694,7 +694,7 @@ export class Broker extends EventEmitter {
       worker.job.event(JobEvent.start);
     });
 
-    worker.on(RemoteEvent.progress, async (prog: M.Progress) => {
+    worker.on(RemoteEvent.progress, async (msg: M.Progress) => {
       if (!worker.job) {
         this.log.error('missing job (progress)', worker.name);
         return;
@@ -702,7 +702,7 @@ export class Broker extends EventEmitter {
 
       if (worker.job.stallms) {
         try {
-          await this.db.updateById(prog.jobid, {
+          await this.db.updateById(msg.jobid, {
             stalls: new Date(Date.now() + worker.job.stallms)
           });
         }
@@ -711,16 +711,16 @@ export class Broker extends EventEmitter {
         }
       }
 
-      worker.job.event(JobEvent.progress, prog.progress);
+      worker.job.event(JobEvent.progress, msg.progress);
     });
 
-    worker.on(RemoteEvent.finish, async (finishData: M.Finish) => {
+    worker.on(RemoteEvent.finish, async (msg: M.Finish) => {
       if (!worker.job) {
         this.log.error('missing job (finish)', worker.name);
         return;
       }
 
-      await this.finishJob(worker.id, worker.job, finishData);
+      await this.finishJob(worker.id, worker.job, msg);
 
       worker.job = null; // release worker even if update failed
 
@@ -747,7 +747,12 @@ export class Broker extends EventEmitter {
       this.log.warn('skip job assign:, worker closing');
       return false;
     }
-    else if (!(await worker.sendMsg(M.Code.add, Job.toJobAttr(job)))) {
+
+    const add: M.Add = {
+      job: Job.toJobAttr(job)
+    };
+
+    if (!(await worker.sendMsg(M.Code.add, add))) {
       this.log.warn('rolling back job assignment');
 
       if (!(await this.updateJob(job, 'ready'))) {

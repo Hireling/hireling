@@ -40,7 +40,7 @@ const nanData = {
   a: NaN
 };
 
-const slowEchoWork: JobContext = async (job) => job.data;
+const echoWork: JobContext = async (job) => job.data;
 
 @TestFixture()
 export class MessageTest {
@@ -69,7 +69,7 @@ export class MessageTest {
 
     await broker.clearJobs();
 
-    worker = new Worker(workerCfg, slowEchoWork).start();
+    worker = new Worker(workerCfg, echoWork).start();
 
     await ewait(broker, BrokerEvent.drain);
   }

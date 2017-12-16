@@ -4,12 +4,12 @@ import * as WS from 'ws';
 import * as M from './message';
 import { Serializer } from './serializer';
 import { Logger, LogLevel } from './logger';
-import { JobAttr, JobData, JobStrategy } from './job';
+import { JobAttr, JobMeta, JobData, JobStrategy } from './job';
 import { spinlock, mergeOpt, NoopHandler } from './util';
 
-export interface JobHandle {
-  meta:     JobAttr;
-  data:     JobData;
+export interface JobHandle<T = any> {
+  meta:     JobMeta;
+  data:     JobData<T>;
   progress: (progress: number) => void;
 }
 
@@ -270,8 +270,8 @@ export class Worker extends EventEmitter {
     return ws;
   }
 
-  private async executeTask(addData: M.Add) {
-    const job: JobAttr = addData;
+  private async executeTask(msg: M.Add) {
+    const job = msg.job;
 
     this.job = job;
 
@@ -279,11 +279,11 @@ export class Worker extends EventEmitter {
 
     this.event(WorkerEvent.jobstart);
 
-    const startData: M.Start = { jobid: job.id };
+    const start: M.Start = { jobid: job.id };
 
-    await this.sendMsg(M.Code.start, startData);
+    await this.sendMsg(M.Code.start, start);
 
-    let data: M.Finish;
+    let finish: M.Finish;
 
     try {
       // execute and forward progress events
@@ -291,15 +291,15 @@ export class Worker extends EventEmitter {
         meta: job,
         data: job.data,
         progress: async (progress) => {
-          const data: M.Progress = { jobid: job.id, progress };
+          const prog: M.Progress = { jobid: job.id, progress };
 
-          this.event(WorkerEvent.jobprogress, data);
+          this.event(WorkerEvent.jobprogress, prog);
 
-          await this.sendMsg(M.Code.progress, data);
+          await this.sendMsg(M.Code.progress, prog);
         }
       });
 
-      data = {
+      finish = {
         jobid:  job.id,
         status: 'done',
         result
@@ -310,7 +310,7 @@ export class Worker extends EventEmitter {
     catch (err) {
       this.log.error('job error', err);
 
-      data = {
+      finish = {
         jobid:  job.id,
         status: 'failed',
         result: String(err)
@@ -325,7 +325,7 @@ export class Worker extends EventEmitter {
 
     this.event(WorkerEvent.jobfinish, { resumed: wasResumed });
 
-    await this.sendMsg(M.Code.finish, data);
+    await this.sendMsg(M.Code.finish, finish);
   }
 
   private async handleMsg(msg: M.Msg) {
