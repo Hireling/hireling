@@ -678,7 +678,7 @@ export class Broker extends EventEmitter {
 
       await worker.sendMsg(M.Code.readyok, readyOk);
 
-      if (!this.opt.manual) {
+      if (!this.opt.manual && !worker.job) { // could have resumed job
         await this.tryAssignJob();
       }
     });
