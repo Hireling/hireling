@@ -142,16 +142,16 @@ export class Server extends EventEmitter {
         }
       });
 
-      ws.on('error', (err) => {
-        this.log.error('socket error', err);
-      });
-
       ws.on('close', (code, reason) => {
         this.log.error('socket close', code, reason);
 
         if (worker) {
           this.event(ServerEvent.workerdisconnect, worker);
         }
+      });
+
+      ws.on('error', (err) => {
+        this.log.error('socket error', err);
       });
     });
 
