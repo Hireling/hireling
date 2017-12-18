@@ -36,6 +36,7 @@ export class Server extends EventEmitter {
   private server: WS.Server;
   private readonly opt: ServerOpt;
   private readonly log = new Logger(Server.name);
+  private readonly logRemote = new Logger(Remote.name); // shared instance
 
   constructor(opt?: TopPartial<ServerOpt>) {
     super();
@@ -46,6 +47,7 @@ export class Server extends EventEmitter {
 
   set logLevel(val: LogLevel) {
     this.log.level = val;
+    this.logRemote.level = val;
   }
 
   start() {
@@ -85,13 +87,13 @@ export class Server extends EventEmitter {
         if (!worker) {
           switch (msg.code) {
             case M.Code.ready:
-              const readyMsg = msg.data as M.Ready;
+              const ready = msg.data as M.Ready;
 
               // associate worker object with socket
-              worker = new Remote(readyMsg.id, readyMsg.name, ws);
+              worker = new Remote(ready.id, ready.name, ws, this.logRemote);
 
               // allow broker to attach worker events
-              this.event(ServerEvent.workerconnect, worker, readyMsg);
+              this.event(ServerEvent.workerconnect, worker, ready);
 
               worker.event(RemoteEvent.ready, msg.data);
             break;

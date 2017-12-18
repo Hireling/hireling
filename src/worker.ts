@@ -375,7 +375,7 @@ export class Worker extends EventEmitter {
         return resolve(false);
       }
 
-      const swapMsg = (
+      const doSwap = (
         this.strategy === 'execquiet' &&
         (
           code === M.Code.start ||
@@ -384,7 +384,7 @@ export class Worker extends EventEmitter {
         )
       );
 
-      const msg: M.Msg = swapMsg ?
+      const msg: M.Msg = doSwap ?
         // send meta/noop instead, will discard results
         { code: M.Code.meta, data: {}, closing: this.closing } :
         { code, data, closing: this.closing };

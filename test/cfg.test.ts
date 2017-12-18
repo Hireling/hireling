@@ -31,11 +31,11 @@ export const workerCfg: TopPartial<WorkerOpt> = {
 };
 
 process.on('unhandledRejection', (err) => {
-  console.error('TEST unhandledRejection', err);
+  console.log('TEST unhandledRejection', err);
 });
 
 process.on('uncaughtException', (err) => {
-  console.error('TEST uncaughtException', err);
+  console.log('TEST uncaughtException', err);
 
   process.exit(1);
 });
