@@ -1,7 +1,7 @@
 {
   "name": "hireling",
   "version": "1.0.5",
-  "description": "Modern, poll-free, multi-server task queue over WebSockets.",
+  "description": "Modern, poll-free, multi-server task queue for Node.js",
   "author": "Alex Soncodi",
   "license": "MIT",
   "private": true,
@@ -42,6 +42,8 @@
     "mongo",
     "mongodb",
     "redis",
+    "postgres",
+    "postgresql",
     "mysql"
   ],
   "repository": {
