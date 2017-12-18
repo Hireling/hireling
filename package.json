@@ -2,34 +2,16 @@
   "name": "hireling",
   "version": "1.0.5",
   "description": "Modern, poll-free, multi-server task queue over WebSockets.",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/Hireling/hireling.git"
-  },
   "author": "Alex Soncodi",
   "license": "MIT",
   "private": true,
-  "keywords": [
-    "distributed",
-    "task",
-    "job",
-    "queue",
-    "runner",
-    "worker",
-    "sockets",
-    "websockets",
-    "typescript",
-    "mongo",
-    "mongodb",
-    "redis",
-    "mysql"
-  ],
   "scripts": {
     "clean": "rm -rf ./build ./coverage ./.nyc_output",
     "lint": "tslint -p tsconfig.json",
     "test": "tsc && alsatian \"./build/test/**/*.test.js\"",
     "coverage": "nyc --reporter=lcov npm run test && nyc report",
     "build": "tsc",
+    "watch": "tsc --watch",
     "package": "npm run clean && npm run build && ./package.sh"
   },
   "dependencies": {
@@ -46,6 +28,25 @@
   },
   "optionalDependencies": {
     "bufferutil": "~3.0.3"
+  },
+  "keywords": [
+    "distributed",
+    "task",
+    "job",
+    "queue",
+    "runner",
+    "worker",
+    "sockets",
+    "websockets",
+    "typescript",
+    "mongo",
+    "mongodb",
+    "redis",
+    "mysql"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Hireling/hireling.git"
   },
   "bugs": {
     "url": "https://github.com/Hireling/hireling/issues"
