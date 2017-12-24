@@ -68,3 +68,46 @@ export async function spinlock(opt: SpinlockOpt) {
 
   return 'spinlock done';
 }
+
+export type AsyncCb = (...args: any[]) => Promise<void>;
+
+export class SeqLock {
+  private lock = false;
+  private cbs: AsyncCb[] = [];
+  private tick = false;
+
+  constructor(tick = false) {
+    this.tick = tick;
+  }
+
+  async push(fn: AsyncCb) {
+    this.cbs.push(fn);
+
+    return this.run();
+  }
+
+  private async run(): Promise<void> {
+    if (this.lock) {
+      return;
+    }
+
+    const cb = this.cbs.shift();
+
+    if (!cb) {
+      return;
+    }
+
+    this.lock = true;
+
+    try {
+      await cb();
+    }
+    catch (err) {
+      console.log('async queue err', err);
+    }
+
+    this.lock = false;
+
+    return (this.tick) ? setImmediate(async () => this.run()) : this.run();
+  }
+}
