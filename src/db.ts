@@ -95,7 +95,7 @@ export class MemoryEngine extends Db {
   }
 
   async reserve(wId: WorkerId) {
-    this.log.debug(`atomic find update job ${wId}`);
+    this.log.debug(`atomic reserve job ${wId}`);
 
     const from: JobStatus = 'ready';
     const to: JobStatus = 'processing';
