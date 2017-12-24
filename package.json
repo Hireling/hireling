@@ -19,11 +19,11 @@
     "ws": "~3.3.3"
   },
   "devDependencies": {
-    "@types/node": "~8.5.1",
+    "@types/node": "~8.5.2",
     "@types/uuid": "~3.4.3",
     "@types/ws": "~3.2.1",
     "alsatian": "~2.0.0",
-    "nyc": "~11.3.0",
+    "nyc": "~11.4.1",
     "typescript": "~2.6.2"
   },
   "optionalDependencies": {
