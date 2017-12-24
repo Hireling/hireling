@@ -33,7 +33,7 @@ export class Logger {
 
   private doPrint(printLevel: LogLevel) {
     return (
-      this.level != LogLevel.none &&
+      this.level !== LogLevel.none &&
       logLevelVal[this.level] <= logLevelVal[printLevel]
     );
   }

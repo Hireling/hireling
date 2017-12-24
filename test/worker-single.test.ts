@@ -281,7 +281,7 @@ export class BrokerTest {
     worker.setContext(async (job) => {
       job.progress(30);
 
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await fnwait(100);
 
       job.progress(100);
     });

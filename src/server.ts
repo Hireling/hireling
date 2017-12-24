@@ -89,13 +89,23 @@ export class Server extends EventEmitter {
             case M.Code.ready:
               const ready = msg.data as M.Ready;
 
-              // associate worker object with socket
               worker = new Remote(ready.id, ready.name, ws, this.logRemote);
 
               // allow broker to attach worker events
-              this.event(ServerEvent.workerconnect, worker, ready);
+              this.event(ServerEvent.workerconnect, worker);
 
-              worker.event(RemoteEvent.ready, msg.data);
+              worker.event(RemoteEvent.ready, ready);
+            break;
+
+            case M.Code.resume:
+              const resume = msg.data as M.Resume;
+
+              worker = new Remote(resume.id, resume.name, ws, this.logRemote);
+
+              // allow broker to attach worker events
+              this.event(ServerEvent.workerconnect, worker);
+
+              worker.event(RemoteEvent.resume, resume);
             break;
 
             default:
@@ -116,15 +126,15 @@ export class Server extends EventEmitter {
             break;
 
             case M.Code.ping:
-              worker.event(RemoteEvent.ping);
+              worker.event(RemoteEvent.ping, msg.data);
             break;
 
             case M.Code.pong:
-              worker.event(RemoteEvent.pong);
+              worker.event(RemoteEvent.pong, msg.data);
             break;
 
             case M.Code.start:
-              worker.event(RemoteEvent.start);
+              worker.event(RemoteEvent.start, msg.data);
             break;
 
             case M.Code.progress:

@@ -1,21 +1,22 @@
-import { JobStatus, JobAttr, JobId } from './job';
-import { WorkerId, ExecStrategy, ResumeData } from './worker';
+import { JobStatus, JobAttr } from './job';
+import { WorkerId, ExecStrategy, ExecData } from './worker';
 
 export const enum Code {
   // common
-  meta = 1, // send meta, no response
+  meta = 1, // send meta, one-way
   ping,     // request pong
   pong,     // respond to ping
 
   // broker => worker
   readyok,  // broker has registered worker
-  add,      // job assigned to worker
+  assign,   // notify worker of job assignment
 
   // worker => broker
-  ready,    // ready to accept work
-  start,    // received job
-  progress, // making progress
-  finish,   // finished job (done, fail)
+  ready,    // connected, ready to accept work
+  resume,   // connected, job already in progress
+  start,    // job starting
+  progress, // job progress (from user)
+  finish,   // job finished (done, fail)
 }
 
 // envelope
@@ -28,7 +29,7 @@ export interface Msg {
 // payload
 export interface Data {}
 
-export interface Add extends Data {
+export interface Assign extends Data {
   readonly job: JobAttr;
 }
 
@@ -37,23 +38,28 @@ export interface ReadyOk extends Data {
 }
 
 export interface Ready extends Data {
-  readonly id:      WorkerId;
-  readonly name:    string;
-  readonly replay?: Finish|null;     // result if finished while disconnected
-  readonly resume?: ResumeData|null; // request to resume active job
+  readonly id:     WorkerId;
+  readonly name:   string;
+  readonly replay: Finish|null; // replay job result obtained while d/c
+}
+
+export interface Resume extends Data {
+  readonly id:   WorkerId;
+  readonly name: string;
+  readonly job:  ExecData; // resume active job, upgrades to replay
 }
 
 export interface Start extends Data {
-  readonly jobid: JobId;
+  readonly job: ExecData;
 }
 
 export interface Progress extends Data {
-  readonly jobid:    JobId;
+  readonly job:      ExecData;
   readonly progress: number;
 }
 
 export interface Finish extends Data {
-  readonly jobid:  JobId;
+  readonly job:    ExecData;
   readonly status: JobStatus;
   readonly result: any;
 }

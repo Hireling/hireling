@@ -27,23 +27,21 @@ export abstract class Db extends EventEmitter {
 
   abstract close(force?: boolean): void;
 
-  abstract clear(): Promise<number>;
-
   abstract add(job: JobAttr): Promise<void>;
 
   abstract getById(id: JobId): Promise<JobAttr|null>;
 
-  abstract atomicFindReady(wId: WorkerId): Promise<JobAttr|null>;
+  abstract get(query: Partial<JobAttr>): Promise<JobAttr[]>;
+
+  abstract reserve(wId: WorkerId): Promise<JobAttr|null>;
 
   abstract updateById(id: JobId, values: Partial<JobAttr>): Promise<void>;
 
   abstract removeById(id: JobId): Promise<boolean>;
 
-  abstract removeByStatus(status: JobStatus): Promise<number>;
+  abstract remove(query: Partial<JobAttr>): Promise<number>;
 
-  abstract refreshExpired(): Promise<number>;
-
-  abstract refreshStalled(): Promise<number>;
+  abstract clear(): Promise<number>;
 
   protected event(e: DbEvent, ...args: any[]) {
     setImmediate(() => {
@@ -73,14 +71,6 @@ export class MemoryEngine extends Db {
     this.event(DbEvent.close);
   }
 
-  async clear() {
-    const removed  = this.jobs.length;
-
-    this.jobs.length = 0; // truncate
-
-    return removed;
-  }
-
   async add(job: JobAttr) {
     this.log.debug(`add job ${job.id}`);
 
@@ -90,14 +80,25 @@ export class MemoryEngine extends Db {
   async getById(id: JobId) {
     this.log.debug('get job by id');
 
-    return this.jobs.find(j => j.id === id) || null;
+    const job = this.jobs.find(j => j.id === id);
+
+    return job ? { ...job } : null;
   }
 
-  async atomicFindReady(wId: WorkerId) {
+  async get(query: Partial<JobAttr>) {
+    this.log.debug('search jobs');
+
+    return this.jobs
+      // @ts-ignore ignore implicit any type
+      .filter(j => Object.entries(query).every(([k, v]) => job[k] === v))
+      .map(j => ({ ...j }));
+  }
+
+  async reserve(wId: WorkerId) {
     this.log.debug(`atomic find update job ${wId}`);
 
     const from: JobStatus = 'ready';
-    const to: JobStatus  = 'processing';
+    const to: JobStatus = 'processing';
 
     const job = this.jobs.find(j => j.status === from);
 
@@ -106,22 +107,17 @@ export class MemoryEngine extends Db {
       job.workerid = wId;
     }
 
-    return job || null;
+    return job ? { ...job } : null;
   }
 
   async updateById(id: JobId, values: Partial<JobAttr>) {
     this.log.debug('update job');
 
-    const job = await this.getById(id);
+    const job = this.jobs.find(j => j.id === id);
 
     if (job) {
-      Object.entries(values).forEach(([k, v]) => {
-        // @ts-ignore ignore implicit any type
-        if (job[k] != v) {
-          // @ts-ignore ignore implicit any type
-          job[k] = v;
-        }
-      });
+      // @ts-ignore ignore implicit any type
+      Object.entries(values).forEach(([k, v]) => job[k] = v);
     }
   }
 
@@ -138,64 +134,25 @@ export class MemoryEngine extends Db {
     return false;
   }
 
-  async removeByStatus(status: JobStatus) {
-    this.log.debug(`remove jobs by status [${status}]`);
+  async remove(query: Partial<JobAttr>) {
+    this.log.debug('remove jobs');
 
-    let removed = 0;
+    const matches = this.jobs
+      // @ts-ignore ignore implicit any type
+      .filter(j => Object.entries(query).every(([k, v]) => job[k] === v));
 
-    for (let i = this.jobs.length - 1; i >= 0; i--) {
-      if (this.jobs[i].status === status) {
-        this.jobs.splice(i, 1);
-        removed++;
-      }
+    for (const m of matches) {
+      this.jobs.splice(this.jobs.indexOf(m), 1);
     }
 
+    return matches.length;
+  }
+
+  async clear() {
+    const removed = this.jobs.length;
+
+    this.jobs.length = 0; // truncate
+
     return removed;
-  }
-
-  async refreshExpired() {
-    this.log.debug('refresh expired jobs');
-
-    const now = Date.now();
-    let updated = 0;
-
-    this.jobs
-      .filter(j =>
-        j.status === 'processing' &&
-        j.expirems && j.expires && j.expires.getTime() < now
-      )
-      .forEach(j => {
-        j.status = 'ready';
-        j.workerid = null;
-        j.expires = new Date(now + j.expirems!);
-        j.attempts++;
-
-        updated++;
-      });
-
-    return updated;
-  }
-
-  async refreshStalled() {
-    this.log.debug('refresh stalled jobs');
-
-    const now = Date.now();
-    let updated = 0;
-
-    this.jobs
-      .filter(j =>
-        j.status === 'processing' &&
-        j.stallms && j.stalls && j.stalls.getTime() < now
-      )
-      .forEach(j => {
-        j.status = 'ready';
-        j.workerid = null;
-        j.stalls = new Date(now + j.stallms!);
-        j.attempts++;
-
-        updated++;
-      });
-
-    return updated;
   }
 }

@@ -13,10 +13,9 @@ export const enum RemoteEvent {
   pong     = 'pong',
   ready    = 'ready',
   resume   = 'resume',
-  replay   = 'replay',
   start    = 'start',
   progress = 'progress',
-  finish   = 'finish',
+  finish   = 'finish'
 }
 
 // tslint:disable:unified-signatures
@@ -26,7 +25,6 @@ export declare interface Remote {
   on(e: RemoteEvent.pong|'pong', fn: NoopHandler): this;
   on(e: RemoteEvent.ready|'ready', fn: NoopHandler): this;
   on(e: RemoteEvent.resume|'resume', fn: NoopHandler): this;
-  on(e: RemoteEvent.replay|'replay', fn: NoopHandler): this;
   on(e: RemoteEvent.start|'start', fn: NoopHandler): this;
   on(e: RemoteEvent.progress|'progress', fn: NoopHandler): this;
   on(e: RemoteEvent.finish|'finish', fn: NoopHandler): this;
@@ -40,8 +38,9 @@ export class Remote extends EventEmitter {
   private readonly ws: WS;
   private readonly log: Logger;
   job: Job|null = null;
-  locked = false;  // hold worker for job assignment
-  closing = false; // worker intends to close
+  lock = false;      // lock worker for job assignment
+  lockStart = false; // lock new worker with unknown job state
+  closing = false;   // worker intends to close
 
   constructor(id: WorkerId, name: string, ws: WS, log: Logger) {
     super();

@@ -16,7 +16,7 @@ export const brokerCfg: TopPartial<BrokerOpt> = {
     port: TEST_PORT
   },
   db: {
-    log:    LogLevel.none
+    log: LogLevel.none
   }
 };
 

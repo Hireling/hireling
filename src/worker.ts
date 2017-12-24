@@ -15,8 +15,10 @@ export interface JobHandle<T = any> {
 export const enum _WorkerId {}
 export type WorkerId = _WorkerId & string; // pseudo nominal typing
 
-export interface ResumeData {
-  id: JobId
+export interface ExecData {
+  jobid:   JobId;
+  started: Date;
+  retries: number; // acts as seq for instances of the same job
 }
 
 export type ExecStrategy = 'exec'|'execquiet'; // TODO: cancel, abort
@@ -66,9 +68,8 @@ export class Worker extends EventEmitter {
   private closingerr: Error|null = null;
   private retrytimer: NodeJS.Timer|null = null;
   private retries = 0;
-  private job: JobAttr|null = null;
-  private resuming = false;
-  private replay: M.Finish|null = null;   // sent on ready
+  private jobexec: ExecData|null = null;   // capture info current job/resume
+  private replay: M.Finish|null = null;    // sent on ready
   private strategy: ExecStrategy = 'exec'; // handling strategy for current job
   private readonly opt: WorkerOpt;
   private readonly log = new Logger(Worker.name);
@@ -87,7 +88,7 @@ export class Worker extends EventEmitter {
     return {
       alive:   !!this.ws,
       closing: this.closing,
-      working: !!this.job
+      working: !!this.jobexec
     };
   }
 
@@ -125,9 +126,7 @@ export class Worker extends EventEmitter {
   stop(force = false) {
     if (this.retrytimer) {
       this.log.info('cancel reconnect timer');
-
       clearTimeout(this.retrytimer);
-
       this.retrytimer = null;
     }
 
@@ -153,7 +152,7 @@ export class Worker extends EventEmitter {
 
     spinlock({
       ms:   this.opt.waitms,
-      test: () => force || !this.job,
+      test: () => force || !this.jobexec,
       pre:  () => this.log.info('waiting on job to finish…')
     })
     .catch((err) => {
@@ -202,16 +201,26 @@ export class Worker extends EventEmitter {
       this.opening = false;
       this.retries = 0;
 
-      const data: M.Ready = {
-        id:     this.id,
-        name:   this.name,
-        replay: this.replay,
-        resume: this.job ? { id: this.job.id } : null
-      };
+      if (this.jobexec) {
+        const resume: M.Resume = {
+          id:   this.id,
+          name: this.name,
+          job:  this.jobexec
+        };
 
-      if (await this.sendMsg(M.Code.ready, data)) {
-        // only replay once
-        this.replay = null;
+        await this.sendMsg(M.Code.resume, resume);
+      }
+      else {
+        const ready: M.Ready = {
+          id:     this.id,
+          name:   this.name,
+          replay: this.replay
+        };
+
+        if (await this.sendMsg(M.Code.ready, ready)) {
+          // only replay once
+          this.replay = null;
+        }
       }
     });
 
@@ -263,63 +272,6 @@ export class Worker extends EventEmitter {
     return ws;
   }
 
-  private async executeTask(msg: M.Add) {
-    const job = msg.job;
-
-    this.job = job;
-
-    this.log.info(`worker ${this.name} starting job ${job.name}`);
-
-    this.event(WorkerEvent.jobstart);
-
-    const start: M.Start = { jobid: job.id };
-
-    await this.sendMsg(M.Code.start, start);
-
-    let finish: M.Finish;
-
-    try {
-      // execute and forward progress events
-      const result = await this.ctx({
-        job,
-        progress: async (progress) => {
-          const prog: M.Progress = { jobid: job.id, progress };
-
-          this.event(WorkerEvent.jobprogress, prog);
-
-          await this.sendMsg(M.Code.progress, prog);
-        }
-      });
-
-      finish = {
-        jobid:  job.id,
-        status: 'done',
-        result
-      };
-
-      this.log.debug('job finished ok');
-    }
-    catch (err) {
-      this.log.error('job error', err);
-
-      finish = {
-        jobid:  job.id,
-        status: 'failed',
-        result: String(err)
-      };
-    }
-
-    const wasResumed = this.resuming;
-
-    this.job = null;
-    this.strategy = 'exec';
-    this.resuming = false;
-
-    this.event(WorkerEvent.jobfinish, { resumed: wasResumed });
-
-    await this.sendMsg(M.Code.finish, finish);
-  }
-
   private async handleMsg(msg: M.Msg) {
     switch (msg.code) {
       case M.Code.meta:
@@ -340,21 +292,84 @@ export class Worker extends EventEmitter {
         const m = msg.data as M.ReadyOk;
 
         this.strategy = m.strategy;
-        this.resuming = !!this.job;
 
         this.log.debug(`${this.name} got readyok (strategy: ${m.strategy})`);
 
         this.event(WorkerEvent.start);
       break;
 
-      case M.Code.add:
-        await this.executeTask(msg.data as M.Add);
+      case M.Code.assign:
+        if (this.jobexec) {
+          this.log.error('worker already has a job', msg);
+          return;
+        }
+
+        await this.run(msg.data as M.Assign);
       break;
 
       default:
-        this.log.error('unkown broker message', msg);
+        this.log.error('unknown broker message', msg);
       break;
     }
+  }
+
+  private async run(msg: M.Assign) {
+    const job = msg.job;
+    const exec: ExecData = {
+      jobid:   job.id,
+      started: new Date(),
+      retries: job.retries
+    };
+
+    this.jobexec = exec;
+
+    this.log.info(`worker ${this.name} starting job ${job.name}`);
+
+    this.event(WorkerEvent.jobstart);
+
+    const start: M.Start = { job: exec };
+
+    await this.sendMsg(M.Code.start, start);
+
+    let result: any;
+    let status: 'done'|'failed';
+
+    try {
+      // execute and forward progress events
+      result = await this.ctx({
+        job,
+        progress: async (progress) => {
+          const prog: M.Progress = { job: exec, progress };
+
+          this.event(WorkerEvent.jobprogress, prog);
+
+          await this.sendMsg(M.Code.progress, prog);
+        }
+      });
+
+      status = 'done';
+
+      this.log.debug('job finished ok');
+    }
+    catch (err) {
+      // obscure error stack
+      result = err instanceof Error ? err.message : String(err);
+
+      status = 'failed';
+
+      this.log.error('job error', err);
+    }
+
+    const resumed = !!this.jobexec;
+
+    this.jobexec = null;
+    this.strategy = 'exec';
+
+    this.event(WorkerEvent.jobfinish, { resumed });
+
+    const finish: M.Finish = { job: exec, status, result };
+
+    await this.sendMsg(M.Code.finish, finish);
   }
 
   private trySaveReplay(code: M.Code, data: M.Data) {
@@ -370,17 +385,11 @@ export class Worker extends EventEmitter {
 
   private async sendMsg(code: M.Code, data: M.Data = {}) {
     return new Promise<boolean>((resolve) => {
-      if (!this.ws) {
-        this.trySaveReplay(code, data);
-        return resolve(false);
-      }
-
       const doSwap = (
         this.strategy === 'execquiet' &&
         (
           code === M.Code.start ||
-          code === M.Code.progress ||
-          code === M.Code.finish
+          code === M.Code.progress
         )
       );
 
@@ -388,6 +397,12 @@ export class Worker extends EventEmitter {
         // send meta/noop instead, will discard results
         { code: M.Code.meta, data: {}, closing: this.closing } :
         { code, data, closing: this.closing };
+
+      if (!this.ws) {
+        this.trySaveReplay(code, data);
+
+        return resolve(false);
+      }
 
       this.ws.send(Serializer.pack(msg), (err) => {
         if (err) {
