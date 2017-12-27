@@ -203,10 +203,10 @@ export class Broker extends EventEmitter {
   }
 
   async clearJobs() {
+    await this.db.clear();
+
     this.jobs.forEach(job => this.removeJobHandle(job));
     // this.jobs.clear();
-
-    await this.db.clear();
   }
 
   async createJob<T>(opt: JobCreate<T> = {}) {
@@ -267,96 +267,7 @@ export class Broker extends EventEmitter {
       return false;
     }
 
-    return this.assignToWorker(worker);
-  }
-
-  private async assignToWorker(worker: Remote) {
-    if (this.closing) {
-      this.log.warn('skip job assign: broker is closing');
-      return false;
-    }
-    else if (!this.serveropen || !this.dbopen) {
-      this.log.warn('skip job assign: broker is not ready');
-      return false;
-    }
-
-    let assigned = false;
-
-    worker.lock = true;
-
-    const job = await this.reserveJob(worker);
-
-    if (job) {
-      assigned = await this.assignJob(worker, job);
-    }
-    else {
-      this.event(BrokerEvent.drain);
-    }
-
-    worker.lock = false;
-
-    return assigned;
-  }
-
-  private async replay(replay: Replay) {
-    try {
-      const { workerid, data } = replay;
-
-      const job = await this.getJobById(data.job.jobid);
-
-      if (!job) {
-        this.log.warn('replay job already finished', data.job.jobid);
-      }
-      else if (!job.attr.workerid) {
-        // recover job before it is reassigned
-        await this.db.updateById(job.attr.id, { status: replay.data.status });
-      }
-      else if (job.attr.workerid !== workerid) {
-        this.log.error('replay job reassigned', job.attr.id);
-        // TODO: cancel/abort replay job double still ongoing
-      }
-      else if (job.attr.retries !== replay.data.job.retries) {
-        this.log.error('replay job different instance', job.attr.id);
-        // TODO: cancel/abort replay job double still ongoing
-      }
-      else {
-        return this.finishJob(job.attr.workerid, job, data);
-      }
-    }
-    catch (err) {
-      this.replays.push(replay);
-      this.log.error('replay fetch error, queued for later', err);
-      return false;
-    }
-
-    return true;
-  }
-
-  private async reclaim(worker: Remote, ex: ExecData, e: RemoteEvent) {
-    try {
-      const job = await this.getJobById(ex.jobid);
-
-      if (!job) {
-        return null;
-      }
-      else if (!job.attr.workerid) {
-        // TODO: job can be recovered here
-        return null;
-      }
-      else if (job.attr.workerid !== worker.id) {
-        return null;
-      }
-      else if (job.attr.retries !== ex.retries) {
-        return null;
-      }
-      else {
-        return job;
-      }
-    }
-    catch (err) {
-      this.log.error(`reclaim fetch error (${e})`, worker.name);
-      return null;
-    }
+    return this.reserveJob(worker);
   }
 
   private startGC() {
@@ -405,9 +316,9 @@ export class Broker extends EventEmitter {
 
   private async gcSingle(job: Job) {
     try {
-      this.removeJobHandle(job);
-
       await this.db.removeById(job.attr.id);
+
+      this.removeJobHandle(job);
     }
     catch (err) {
       this.log.error('gc err', err);
@@ -430,7 +341,7 @@ export class Broker extends EventEmitter {
     this.log.warn('job expired', job.attr.id, job.attr.status);
 
     if (job.attr.status === 'processing') {
-      const update: Partial<JobAttr> = (Job.canRetry(job.attr)) ? {
+      const update: Partial<JobAttr> = job.canRetry() ? {
         status:   'ready', // eligible for re-queue
         workerid: null,    // TODO: allow ongoing job recovery
         expires:  null,
@@ -439,7 +350,7 @@ export class Broker extends EventEmitter {
         status: 'failed'
       };
 
-      if (job.attr.stalls !== null && Job.canRetry(job.attr)) {
+      if (job.attr.stalls !== null && job.canRetry()) {
         update.stalls = null;
       }
 
@@ -456,7 +367,7 @@ export class Broker extends EventEmitter {
     this.log.warn('job stalled', job.attr.id, job.attr.status);
 
     if (job.attr.status === 'processing') {
-      const update: Partial<JobAttr> = (Job.canRetry(job.attr)) ? {
+      const update: Partial<JobAttr> = job.canRetry() ? {
         status:   'ready', // eligible for re-queue
         workerid: null,    // TODO: allow ongoing job recovery
         stalls:   null,
@@ -465,7 +376,7 @@ export class Broker extends EventEmitter {
         status: 'failed'
       };
 
-      if (job.attr.expires !== null && Job.canRetry(job.attr)) {
+      if (job.attr.expires !== null && job.canRetry()) {
         update.expires = null;
       }
 
@@ -492,27 +403,36 @@ export class Broker extends EventEmitter {
         return;
       }
 
+      for (const r of this.replays.slice()) {
+        try {
+          const job = await this.resumeJob(r.workerid, r.data.job, 'replay');
+
+          if (job) {
+            await this.finishJob(r.workerid, job, r.data);
+          }
+
+          this.replays.splice(this.replays.indexOf(r), 1);
+        }
+        catch (err) {
+          return; // abort db start
+        }
+      }
+
       try {
         // resync active jobs and timers
         const jobs = await this.db.get({ status: 'processing' });
 
-        jobs.forEach(j => this.addJobHandle(j));
+        jobs.forEach(j => {
+          const job = this.addJobHandle(j);
+
+          // use created date as fallback
+          job.syncTimers(job.attr.created);
+        });
 
         this.log.warn(`loaded ${jobs.length} active jobs`);
       }
       catch (err) {
-        // abort db start
-        return;
-      }
-
-      for (const r of this.replays.slice()) {
-        if (await this.replay(r)) {
-          this.replays.splice(this.replays.indexOf(r), 1);
-        }
-        else {
-          // abort replays and db start
-          return;
-        }
+        return; // abort db start
       }
 
       this.startGC();
@@ -639,13 +559,13 @@ export class Broker extends EventEmitter {
     const seq = new SeqLock(true); // process requests sequentially
 
     worker.on(RemoteEvent.meta, async () => {
-      return seq.push(async () => {
+      return seq.run(async () => {
         this.log.debug(`meta from ${worker.name}`);
       });
     });
 
     worker.on(RemoteEvent.ping, async () => {
-      return seq.push(async () => {
+      return seq.run(async () => {
         this.log.debug(`ping from ${worker.name}`);
 
         await worker.sendMsg(M.Code.pong);
@@ -653,20 +573,31 @@ export class Broker extends EventEmitter {
     });
 
     worker.on(RemoteEvent.pong, async () => {
-      return seq.push(async () => {
+      return seq.run(async () => {
         this.log.debug(`pong from ${worker.name}`);
       });
     });
 
     worker.on(RemoteEvent.ready, async (msg: M.Ready) => {
-      return seq.push(async () => {
-        if (msg.replay) {
-          // replay only occurs once, nothing more for worker to do
-          await this.replay({ workerid: worker.id, data: msg.replay });
+      return seq.run(async () => {
+        const replay = msg.replay;
+
+        if (replay) {
+          try {
+            const job = await this.resumeJob(worker.id, replay.job, 'ready');
+
+            if (job) {
+              await this.finishJob(worker.id, job, replay);
+            }
+          }
+          catch (err) {
+            this.replays.push({ workerid: worker.id, data: replay });
+          }
         }
 
-        worker.lockStart = false; // crash recovery
-        worker.job = null; // crash recovery
+        // crash recovery
+        worker.lockStart = false;
+        worker.job = null;
 
         const strat: ExecStrategy = 'exec';
         const readyOk: M.ReadyOk = { strategy: strat };
@@ -679,24 +610,27 @@ export class Broker extends EventEmitter {
           this.event(BrokerEvent.workerjoin);
 
           if (!this.opt.manual) {
-            await this.assignToWorker(worker);
+            await this.reserveJob(worker);
           }
         }
       });
     });
 
     worker.on(RemoteEvent.resume, async (msg: M.Resume) => {
-      return seq.push(async () => {
-        const job = await this.reclaim(worker, msg.job, RemoteEvent.resume);
+      return seq.run(async () => {
+        const job = await this.resumeJob(worker.id, msg.job, 'resume');
 
-        if (job) {
-          // job recovered, update timers relative to original start
-          await this.recoverTimers(job, msg.job);
-        }
-
-        // lock worker if job was not reclaimed (in lieu of job assignment)
+        // lock worker if active job unrecoverable (in lieu of job assignment)
         worker.lockStart = !job;
         worker.job = job;
+
+        if (job) {
+          const update = job.syncTimers(msg.job.started);
+
+          if (update) {
+            await this.updateJob(job, update);
+          }
+        }
 
         const strat: ExecStrategy = job ? 'exec' : 'execquiet';
         const readyOk: M.ReadyOk = { strategy: strat };
@@ -712,36 +646,44 @@ export class Broker extends EventEmitter {
     });
 
     worker.on(RemoteEvent.start, async (msg: M.Start) => {
-      return seq.push(async () => {
-        const job = await this.reclaim(worker, msg.job, RemoteEvent.start);
+      return seq.run(async () => {
+        const job = await this.resumeJob(worker.id, msg.job, 'start');
 
         if (!job) {
           return;
         }
 
-        await this.recoverTimers(job, msg.job);
+        const update = job.syncTimers(msg.job.started);
+
+        if (update) {
+          await this.updateJob(job, update);
+        }
 
         job.event(JobEvent.start);
       });
     });
 
     worker.on(RemoteEvent.progress, async (msg: M.Progress) => {
-      return seq.push(async () => {
-        const job = await this.reclaim(worker, msg.job, RemoteEvent.progress);
+      return seq.run(async () => {
+        const job = await this.resumeJob(worker.id, msg.job, 'progress');
 
         if (!job) {
           return;
         }
 
-        await this.recoverTimers(job, msg.job);
+        const update = job.syncTimers(msg.job.started);
+
+        if (update) {
+          await this.updateJob(job, update);
+        }
 
         job.event(JobEvent.progress, msg.progress);
       });
     });
 
     worker.on(RemoteEvent.finish, async (msg: M.Finish) => {
-      return seq.push(async () => {
-        const job = await this.reclaim(worker, msg.job, RemoteEvent.finish);
+      return seq.run(async () => {
+        const job = await this.resumeJob(worker.id, msg.job, 'finish');
 
         if (worker.lockStart) {
           this.log.warn('unlocking worker resume');
@@ -753,41 +695,92 @@ export class Broker extends EventEmitter {
           return;
         }
 
-        // await this.recoverTimers(job, msg.job);
-
         await this.finishJob(worker.id, job, msg);
 
         worker.job = null; // release worker even if update failed
 
         if (!this.opt.manual) {
-          await this.assignToWorker(worker);
+          await this.reserveJob(worker);
         }
       });
     });
   }
 
-  private async recoverTimers(job: Job, execData: ExecData) {
-    const update: { expires?: Date; stalls?:  Date } = {};
-    const startTs = execData.started.getTime();
-    const lastProgTs = job.attr.stalls && job.attr.stalls.getTime() || 0;
-    const progTs = Date.now();
+  private async resumeJob(wId: WorkerId, ex: ExecData, tag: string) {
+    const { jobid, retries } = ex;
 
-    if (job.attr.expirems && !job.attr.expires) {
-      update.expires = new Date(startTs + job.attr.expirems);
+    const job = this.jobs.get(jobid);
+
+    const j = job && job.attr || await this.db.getById(jobid);
+
+    if (!j) {
+      this.log.warn(`${tag} job not found`, jobid);
+    }
+    else if (!j.workerid) {
+      this.log.error(`${tag} job unassigned`, j.id);
+      // TODO: lock and recover
+    }
+    else if (j.workerid !== wId) {
+      this.log.error(`${tag} job reassigned`, j.id);
+      // TODO: cancel/abort
+    }
+    else if (j.retries !== retries) {
+      this.log.error(`${tag} job has a new instance`, j.id);
+      // TODO: cancel/abort
+    }
+    else if (j.status !== 'processing') {
+      this.log.error(`${tag} job no longer processing`, j.id);
+      // TODO: lock and recover
+    }
+    else {
+      return job || this.addJobHandle(j);
     }
 
-    if (job.attr.stallms && lastProgTs !== progTs) {
-      update.stalls = new Date(progTs + job.attr.stallms);
+    return null;
+  }
+
+  private async reserveJob(worker: Remote) {
+    if (this.closing) {
+      this.log.warn('skip job assign: broker is closing');
+      return false;
+    }
+    else if (!this.serveropen || !this.dbopen) {
+      this.log.warn('skip job assign: broker is not ready');
+      return false;
     }
 
-    if (Object.keys(update).length > 0) {
-      if (await this.updateJob(job, update)) {
-        job.startTimers(execData.started);
+    let assigned = false;
+
+    worker.lock = true;
+
+    try {
+      const j = await this.db.reserve(worker.id);
+
+      if (j) {
+        let job = this.jobs.get(j.id);
+
+        if (job) {
+          // sync mem
+          job.attr.workerid = worker.id;
+          job.attr.status = 'processing';
+        }
+        else {
+          job = this.addJobHandle(j);
+        }
+
+        assigned = await this.assignJob(worker, job);
       }
       else {
-        this.log.error('timer update error, job may expire/stall', job.attr.id);
+        this.event(BrokerEvent.drain);
       }
     }
+    catch (err) {
+      this.log.error('could not reserve job', err);
+    }
+
+    worker.lock = false;
+
+    return assigned;
   }
 
   private async assignJob(worker: Remote, job: Job) {
@@ -836,7 +829,7 @@ export class Broker extends EventEmitter {
       status: msg.status
     };
 
-    if (msg.status === 'failed' && Job.canRetry(job.attr)) {
+    if (msg.status === 'failed' && job.canRetry()) {
       update.status = 'ready'; // re-queue job to retry
       update.retries = job.attr.retries + 1;
     }
@@ -882,7 +875,6 @@ export class Broker extends EventEmitter {
 
     const job = new Job(j, this.logJob);
 
-    // store job handle with client-attached events
     this.jobs.set(job.attr.id, job);
 
     job.on('expire', async () => this.expireJob(job));
@@ -898,44 +890,6 @@ export class Broker extends EventEmitter {
     this.jobs.delete(job.attr.id);
 
     this.log.debug('freed job handle', job.attr.id);
-  }
-
-  private async getJobById(id: JobId) {
-    const j = await this.db.getById(id);
-
-    if (j) {
-      const job = this.jobs.get(j.id);
-
-      return job || this.addJobHandle(j);
-    }
-
-    return null;
-  }
-
-  private async reserveJob(worker: Remote) {
-    try {
-      const j = await this.db.reserve(worker.id);
-
-      if (!j) {
-        return null;
-      }
-
-      // try to restore job with client events
-      const job = this.jobs.get(j.id);
-
-      if (job) {
-        // sync mem
-        job.attr.workerid = worker.id;
-        job.attr.status = 'processing';
-      }
-
-      return job || this.addJobHandle(j);
-    }
-    catch (err) {
-      this.log.error('could not reserve job', err);
-
-      return null;
-    }
   }
 
   private async addJob(opt: JobCreate, status: JobStatus, wId: WorkerId|null) {

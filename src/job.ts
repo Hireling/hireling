@@ -56,48 +56,24 @@ export class Job<T = any> extends EventEmitter {
 
     this.attr = j;
     this.log = log;
-
-    const now = Date.now();
-
-    if (this.attr.status === 'processing') {
-      // recover timers
-      if (this.attr.expirems && this.attr.expires) {
-        this.log.debug('recover expire timer', this.attr.id);
-
-        this.expireTimer = setTimeout(() => {
-          this.event(JobEvent.expire);
-        }, this.attr.expires.getTime() - now);
-
-        this.expireTimer.unref();
-      }
-
-      if (this.attr.stallms && this.attr.stalls) {
-        this.log.debug('recover stall timer', this.attr.id);
-
-        this.stallTimer = setTimeout(() => {
-          this.event(JobEvent.stall);
-        }, this.attr.stalls.getTime() - now);
-
-        this.stallTimer.unref();
-      }
-    }
   }
 
-  startTimers(startedAt: Date) {
-    if (this.attr.expirems && !this.attr.expires) {
-      if (this.expireTimer) {
-        this.log.error('expire timer already exists', this.attr.id);
-      }
-      else {
-        const expireDate = new Date(startedAt.getTime() + this.attr.expirems);
-        const offsetms = expireDate.getTime() - Date.now();
+  syncTimers(startAt: Date) {
+    const update: { expires?: Date; stalls?:  Date } = {};
+    const now = Date.now();
 
-        this.expireTimer = setTimeout(() => {
-          this.event(JobEvent.expire);
-        }, offsetms);
+    if (!this.expireTimer && this.attr.expirems) {
+      const ms = this.attr.expires ?
+        this.attr.expires.getTime() - now :
+        startAt.getTime() + this.attr.expirems - now;
 
-        this.expireTimer.unref();
-      }
+      // may have egative timeout (already elapsed)
+      this.expireTimer = setTimeout(() => this.event(JobEvent.expire), ms);
+      this.expireTimer.unref();
+
+      this.log.debug(`set expire timer (${ms}ms)`, this.attr.id);
+
+      update.expires = new Date(now + ms);
     }
 
     if (this.attr.stallms) {
@@ -107,12 +83,17 @@ export class Job<T = any> extends EventEmitter {
         this.stallTimer = null;
       }
 
-      this.stallTimer = setTimeout(() => {
-        this.event(JobEvent.stall);
-      }, this.attr.stallms);
+      const ms = this.attr.stallms;
 
+      this.stallTimer = setTimeout(() => this.event(JobEvent.stall), ms);
       this.stallTimer.unref();
+
+      this.log.debug(`set stall timer (${ms}ms)`, this.attr.id);
+
+      update.stalls = new Date(now + ms);
     }
+
+    return Object.keys(update).length > 0 ? update : null;
   }
 
   stopTimers() {
@@ -131,8 +112,8 @@ export class Job<T = any> extends EventEmitter {
     }
   }
 
-  static canRetry(j: JobAttr) {
-    return j.retryx > 0 && j.retries < j.retryx;
+  canRetry() {
+    return this.attr.retryx > 0 && this.attr.retries < this.attr.retryx;
   }
 
   async toPromise() {

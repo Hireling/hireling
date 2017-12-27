@@ -5,7 +5,7 @@ import * as M from './message';
 import { Serializer } from './serializer';
 import { Logger, LogLevel } from './logger';
 import { JobId, JobAttr } from './job';
-import { spinlock, mergeOpt, NoopHandler } from './util';
+import { spinlock, mergeOpt, NoopHandler, SeqLock } from './util';
 
 export interface JobHandle<T = any> {
   job:      JobAttr<T>;
@@ -273,43 +273,51 @@ export class Worker extends EventEmitter {
   }
 
   private async handleMsg(msg: M.Msg) {
+    const seq = new SeqLock(false); // process requests sequentially
+
     switch (msg.code) {
       case M.Code.meta:
-        this.log.debug(`${this.name} got meta`);
-      break;
+        return seq.run(async () => {
+          this.log.debug(`${this.name} got meta`);
+        });
 
       case M.Code.ping:
-        this.log.debug(`${this.name} got ping`);
+        return seq.run(async () => {
+          this.log.debug(`${this.name} got ping`);
 
-        await this.sendMsg(M.Code.pong);
-      break;
+          await this.sendMsg(M.Code.pong);
+        });
 
       case M.Code.pong:
-        this.log.debug(`${this.name} got pong`);
-      break;
+        return seq.run(async () => {
+          this.log.debug(`${this.name} got pong`);
+        });
 
       case M.Code.readyok:
-        const m = msg.data as M.ReadyOk;
+        return seq.run(async () => {
+          const m = msg.data as M.ReadyOk;
 
-        this.strategy = m.strategy;
+          this.strategy = m.strategy;
 
-        this.log.debug(`${this.name} got readyok (strategy: ${m.strategy})`);
+          this.log.debug(`${this.name} got readyok (strategy: ${m.strategy})`);
 
-        this.event(WorkerEvent.start);
-      break;
+          this.event(WorkerEvent.start);
+        });
 
       case M.Code.assign:
-        if (this.jobexec) {
-          this.log.error('worker already has a job', msg);
-          return;
-        }
+        return seq.run(async () => {
+          if (this.jobexec) {
+            this.log.error('worker already has a job', msg);
+            return;
+          }
 
-        await this.run(msg.data as M.Assign);
-      break;
+          await this.run(msg.data as M.Assign);
+        });
 
       default:
-        this.log.error('unknown broker message', msg);
-      break;
+        return seq.run(async () => {
+          this.log.error('unknown broker message', msg);
+        });
     }
   }
 

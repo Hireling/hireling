@@ -80,13 +80,13 @@ export class SeqLock {
     this.tick = tick;
   }
 
-  async push(fn: AsyncCb) {
+  async run(fn: AsyncCb) {
     this.cbs.push(fn);
 
-    return this.run();
+    return this.turn();
   }
 
-  private async run(): Promise<void> {
+  private async turn(): Promise<void> {
     if (this.lock) {
       return;
     }
@@ -108,6 +108,6 @@ export class SeqLock {
 
     this.lock = false;
 
-    return (this.tick) ? setImmediate(async () => this.run()) : this.run();
+    return (this.tick) ? setImmediate(async () => this.turn()) : this.turn();
   }
 }
