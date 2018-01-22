@@ -3,7 +3,6 @@ import { JobContext, JobHandle } from './worker';
 
 export class Runner {
   cproc: ChildProcess;
-  _abort = false;
   private readonly ctx: JobContext|string;
   private readonly sandbox: boolean;
 
@@ -37,16 +36,9 @@ export class Runner {
     }
   }
 
-  abort() {
-    this._abort = true;
-
-    this.cproc.kill();
-  }
-
   private async runInSandbox(jh: JobHandle, ctx: string, isPath: boolean) {
     return new Promise<any>((resolve, reject) => {
       const cproc = fork(`${__dirname}/sandbox`);
-      let resolved = false;
 
       this.cproc = cproc;
 
@@ -60,34 +52,6 @@ export class Runner {
         else if (msg.result) {
           return resolve(msg.result);
         }
-      });
-
-      cproc.on('disconnect', () => {
-        console.log('child disconnect');
-      });
-
-      cproc.on('exit', () => {
-        console.log('child exit');
-
-        // if (!resolved) {
-        //   resolved = true;
-        //   return resolve('done ok');
-        // }
-      });
-
-      cproc.on('error', (err) => {
-        console.log('child error', err);
-
-        if (!resolved) {
-          resolved = true;
-          return reject(err);
-        }
-      });
-
-      cproc.on('close', () => {
-        console.log('child close');
-
-        return this._abort ? reject('aborted') : resolve('x');
       });
 
       cproc.send({ jh, ctx, isPath });
