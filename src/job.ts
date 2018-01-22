@@ -14,12 +14,13 @@ export interface JobAttr<T = any> {
   name:     string;
   created:  Date;        // absolute
   expires:  Date|null;   // absolute
-  expirems: number|null; // relative
+  expirems: number|null; // relative, max life from time of creation
   stalls:   Date|null;   // absolute
-  stallms:  number|null; // relative
+  stallms:  number|null; // relative, max time between worker updates
   status:   JobStatus;
-  retryx:   number;      // number of times to rety
+  retryx:   number;      // number of times to rety upon failure
   retries:  number;      // current attempt count, also acts as seq number
+  sandbox:  boolean;     // run this job inside a sandbox
   data:     T;           // user-supplied data
 }
 
@@ -59,7 +60,7 @@ export class Job<T = any> extends EventEmitter {
   }
 
   syncTimers(startAt: Date) {
-    const update: { expires?: Date; stalls?:  Date } = {};
+    const update: { expires?: Date; stalls?: Date } = {};
     const now = Date.now();
 
     if (!this.expireTimer && this.attr.expirems) {
@@ -67,7 +68,7 @@ export class Job<T = any> extends EventEmitter {
         this.attr.expires.getTime() - now :
         startAt.getTime() + this.attr.expirems - now;
 
-      // may have egative timeout (already elapsed)
+      // may have negative timeout (already elapsed)
       this.expireTimer = setTimeout(() => this.event(JobEvent.expire), ms);
       this.expireTimer.unref();
 

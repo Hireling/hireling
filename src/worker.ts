@@ -6,6 +6,7 @@ import { Serializer } from './serializer';
 import { Logger, LogLevel } from './logger';
 import { JobId, JobAttr } from './job';
 import { spinlock, mergeOpt, NoopHandler, SeqLock } from './util';
+import { Runner } from './runner';
 
 export interface JobHandle<T = any> {
   job:      JobAttr<T>;
@@ -62,7 +63,7 @@ export class Worker extends EventEmitter {
   readonly id: WorkerId;
   readonly name: string;
   private ws: WS|null;
-  private ctx: JobContext;
+  private ctx: JobContext|string;          // as fn or as module path
   private opening = false;
   private closing = false;
   private closingerr: Error|null = null;
@@ -74,7 +75,7 @@ export class Worker extends EventEmitter {
   private readonly opt: WorkerOpt;
   private readonly log = new Logger(Worker.name);
 
-  constructor(opt?: Partial<WorkerOpt>, ctx: JobContext = noopjob) {
+  constructor(opt?: Partial<WorkerOpt>, ctx: JobContext|string = noopjob) {
     super();
 
     this.opt = mergeOpt(WORKER_DEFS, opt) as WorkerOpt;
@@ -96,7 +97,7 @@ export class Worker extends EventEmitter {
     this.log.level = val;
   }
 
-  setContext(ctx: JobContext) {
+  setContext(ctx: JobContext|string) {
     this.ctx = ctx;
 
     return this;
@@ -311,7 +312,9 @@ export class Worker extends EventEmitter {
             return;
           }
 
-          await this.run(msg.data as M.Assign);
+          const assign = msg.data as M.Assign;
+
+          await this.run(assign.job);
         });
 
       default:
@@ -321,8 +324,7 @@ export class Worker extends EventEmitter {
     }
   }
 
-  private async run(msg: M.Assign) {
-    const job = msg.job;
+  private async run(job: JobAttr) {
     const exec: ExecData = {
       jobid:   job.id,
       started: new Date(),
@@ -343,8 +345,9 @@ export class Worker extends EventEmitter {
     let status: 'done'|'failed';
 
     try {
-      // execute and forward progress events
-      result = await this.ctx({
+      const runner = new Runner(this.ctx, job.sandbox);
+
+      result = await runner.run({
         job,
         progress: async (progress) => {
           const prog: M.Progress = { job: exec, progress };
@@ -373,7 +376,7 @@ export class Worker extends EventEmitter {
     this.jobexec = null;
     this.strategy = 'exec';
 
-    this.event(WorkerEvent.jobfinish, { resumed });
+    this.event(WorkerEvent.jobfinish, { resumed }); // TODO: remove this prop
 
     const finish: M.Finish = { job: exec, status, result };
 

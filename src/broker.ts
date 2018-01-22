@@ -11,9 +11,10 @@ import { Remote, RemoteEvent } from './remote';
 
 export interface JobCreate<T = any> {
   name?:     string;
-  expirems?: number; // max life in ms from time of creation
-  stallms?:  number; // max time allowed between worker updates
-  retryx?:   number; // number of times to rety upon failure
+  expirems?: number;
+  stallms?:  number;
+  retryx?:   number;
+  sandbox?:  boolean;
   data?:     T;
 }
 
@@ -907,6 +908,7 @@ export class Broker extends EventEmitter {
       status,
       retryx:   opt.retryx || 0,
       retries:  0,
+      sandbox:  opt.sandbox || false,
       data:     opt.data || {}
     });
 
