@@ -375,4 +375,64 @@ export class BrokerTest {
 
     Expect(result.resumed).toBe(true);
   }
+
+  @AsyncTest()
+  async jobSandboxPathOk() {
+    worker.setContext(`${__dirname}/fixture/ctx-ok`);
+
+    const job = await broker.createJob({ sandbox: true });
+
+    await ewait(job, JobEvent.progress);
+
+    const [result] = await ewait(job, JobEvent.done);
+
+    Expect(result).toBe(555);
+  }
+
+  @AsyncTest()
+  async jobSandboxPathError() {
+    worker.setContext(`${__dirname}/fixture/ctx-err`);
+
+    const job = await broker.createJob({ sandbox: true });
+
+    await ewait(job, JobEvent.progress);
+
+    const [result] = await ewait(job, JobEvent.fail);
+
+    Expect(result).toBe('an error');
+  }
+
+  @AsyncTest()
+  async jobSandboxScriptOk() {
+    worker.setContext(async (jh) => {
+      jh.progress(55);
+
+      return 23;
+    });
+
+    const job = await broker.createJob({ sandbox: true });
+
+    await ewait(job, JobEvent.start);
+
+    const [result] = await ewait(job, JobEvent.done);
+
+    Expect(result).toBe(23);
+  }
+
+  @AsyncTest()
+  async jobSandboxScriptError() {
+    worker.setContext(async (jh) => {
+      jh.progress(55);
+
+      throw new Error('an error');
+    });
+
+    const job = await broker.createJob({ sandbox: true });
+
+    await ewait(job, JobEvent.start);
+
+    const [result] = await ewait(job, JobEvent.fail);
+
+    Expect(result).toBe('an error');
+  }
 }
