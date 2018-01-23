@@ -3,7 +3,7 @@ import {
 } from 'alsatian';
 import { Worker, WorkerEvent, JobContext } from '../src/worker';
 import { ewait } from '../src/util';
-import { workerCfg } from './cfg.test';
+import { workerCfg } from './fixture/cfg';
 
 let worker: Worker;
 

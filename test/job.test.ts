@@ -3,7 +3,7 @@ import {
 } from 'alsatian';
 import { Broker, BrokerEvent } from '../src/broker';
 import { ewait } from '../src/util';
-import { brokerCfg } from './cfg.test';
+import { brokerCfg } from './fixture/cfg';
 
 let broker: Broker;
 

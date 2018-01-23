@@ -5,7 +5,7 @@ import { Broker, BrokerEvent } from '../src/broker';
 import { Worker, WorkerEvent, JobContext } from '../src/worker';
 import { JobEvent } from '../src/job';
 import { ewait, fnwait } from '../src/util';
-import { brokerCfg, workerCfg } from './cfg.test';
+import { brokerCfg, workerCfg } from './fixture/cfg';
 
 let broker: Broker;
 let worker: Worker;

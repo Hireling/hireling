@@ -1,7 +1,7 @@
-import { BrokerOpt } from '../src/broker';
-import { WorkerOpt } from '../src/worker';
-import { LogLevel } from '../src/logger';
-import { TopPartial } from '../src/util';
+import { BrokerOpt } from '../../src/broker';
+import { WorkerOpt } from '../../src/worker';
+import { LogLevel } from '../../src/logger';
+import { TopPartial } from '../../src/util';
 
 const TEST_HOST = '127.0.0.1';
 const TEST_PORT = 3005;
