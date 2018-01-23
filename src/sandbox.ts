@@ -2,10 +2,16 @@ import * as path from 'path';
 import Module = require('module');
 import { JobContext, JobHandle } from './worker';
 
-interface StringifiedArgs {
+export interface StringifiedArgs {
   jh:     JobHandle;
   ctx:    string;
   isPath: boolean;
+}
+
+export const enum CprocMsg {
+  progress = 'progress',
+  result   = 'result',
+  error    = 'error'
 }
 
 process.on('message', async (opts: StringifiedArgs) => {
@@ -13,8 +19,8 @@ process.on('message', async (opts: StringifiedArgs) => {
     const { jh, ctx: _ctx, isPath } = opts;
 
     // re-wire progress hook
-    jh.progress = (arg) => {
-      process.send!({ progress: arg });
+    jh.progress = (progress) => {
+      process.send!({ code: CprocMsg.progress, progress });
     };
 
     let ctx: JobContext;
@@ -36,17 +42,13 @@ process.on('message', async (opts: StringifiedArgs) => {
         parent.children.splice(parent.children.indexOf(m), 1);
       }
 
-      // require.cache[filename] = m;
-
       ctx = m.exports.ctx;
     }
 
-    const result = await ctx(jh);
-
-    process.send!({ result });
+    process.send!({ code: CprocMsg.result, result: await ctx(jh) });
   }
   catch (err) {
-    process.send!({ error: err.message });
+    process.send!({ code: CprocMsg.error, error: err.message });
   }
 });
 

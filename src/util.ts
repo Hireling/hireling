@@ -35,11 +35,11 @@ export async function ewait(tgt: Broker, e: BrokerEvent): Promise<any[]>;
 export async function ewait(tgt: Worker, e: WorkerEvent): Promise<any[]>;
 export async function ewait(tgt: Job, e: JobEvent): Promise<any[]>;
 export async function ewait(tgt: EventEmitter, e: string) {
-  return new Promise<any[]>((resolve) => tgt.once(e, (...args) => resolve(args)));
+  return new Promise<any[]>(resolve => tgt.once(e, (...args) => resolve(args)));
 }
 
 export async function fnwait(ms: number, fn = () => undefined as any) {
-  return new Promise((resolve) => setTimeout(() => resolve(fn()), ms));
+  return new Promise(resolve => setTimeout(() => resolve(fn()), ms));
 }
 
 export interface SpinlockOpt {

@@ -1,8 +1,10 @@
 import { fork, ChildProcess } from 'child_process';
 import { JobContext, JobHandle } from './worker';
+import { StringifiedArgs, CprocMsg } from './sandbox';
 
 export class Runner {
-  cproc: ChildProcess;
+  cproc: ChildProcess|null;
+  aborted = false;
   private readonly ctx: JobContext|string;
   private readonly sandbox: boolean;
 
@@ -36,25 +38,71 @@ export class Runner {
     }
   }
 
+  abort(signal: string|undefined = undefined) {
+    if (this.cproc) {
+      this.aborted = true;
+
+      this.cproc.kill(signal);
+    }
+    else {
+      throw new Error('job not executing in sandbox');
+    }
+  }
+
   private async runInSandbox(jh: JobHandle, ctx: string, isPath: boolean) {
     return new Promise<any>((resolve, reject) => {
+      let resolved = false;
+
       const cproc = fork(`${__dirname}/sandbox`);
 
       this.cproc = cproc;
 
       cproc.on('message', (msg) => {
-        if (msg.progress) {
+        if (msg.code === CprocMsg.progress) {
           jh.progress(msg.progress); // pipe to worker
         }
-        else if (msg.error) {
-          return reject(msg.error);
+        else if (msg.code === CprocMsg.error) {
+          if (!resolved) {
+            resolved = true;
+
+            return reject(msg.error);
+          }
         }
-        else if (msg.result) {
-          return resolve(msg.result);
+        else if (msg.code === CprocMsg.result) {
+          if (!resolved) {
+            resolved = true;
+
+            return resolve(msg.result);
+          }
+        }
+        else {
+          if (!resolved) {
+            resolved = true;
+
+            return reject(`unknown msg ${msg.code}`);
+          }
         }
       });
 
-      cproc.send({ jh, ctx, isPath });
+      cproc.on('exit', () => {
+        if (!resolved) {
+          resolved = true;
+
+          return reject(this.aborted ? 'aborted' : 'exited');
+        }
+      });
+
+      cproc.on('error', (err) => {
+        if (!resolved) {
+          resolved = true;
+
+          return reject(err ? (err.message || String(err)) : 'sandbox error');
+        }
+      });
+
+      const msg: StringifiedArgs = { jh, ctx, isPath };
+
+      cproc.send(msg);
     });
   }
 }

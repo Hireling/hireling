@@ -169,7 +169,7 @@ export class BrokerTest {
 
     await broker.createJob();
 
-    await ewait(worker, WorkerEvent.jobstart);
+    await ewait(worker, WorkerEvent.jobprogress);
 
     broker.stop();
 
@@ -188,7 +188,7 @@ export class BrokerTest {
 
     await broker.createJob();
 
-    await ewait(worker, WorkerEvent.jobstart);
+    await ewait(worker, WorkerEvent.jobprogress);
 
     broker.stop(true);
 
@@ -390,7 +390,7 @@ export class BrokerTest {
   }
 
   @AsyncTest()
-  async jobSandboxPathError() {
+  async jobSandboxPathFail() {
     worker.setContext(`${__dirname}/fixture/ctx-err`);
 
     const job = await broker.createJob({ sandbox: true });
@@ -403,6 +403,30 @@ export class BrokerTest {
   }
 
   @AsyncTest()
+  async jobSandboxPathExternalFn() {
+    worker.setContext(`${__dirname}/fixture/ctx-fn`);
+
+    const job = await broker.createJob({ sandbox: true });
+
+    await ewait(job, JobEvent.progress);
+
+    const [result] = await ewait(job, JobEvent.done);
+
+    Expect(result).toBe(555);
+  }
+
+  @AsyncTest()
+  async jobSandboxPathInvalid() {
+    worker.setContext(`${__dirname}/fixture/ctx-undefined`);
+
+    const job = await broker.createJob({ sandbox: true });
+
+    const [result] = await ewait(job, JobEvent.fail);
+
+    Expect(/^Cannot find module/.test(result)).toBe(true);
+  }
+
+  @AsyncTest()
   async jobSandboxScriptOk() {
     worker.setContext(async (jh) => {
       jh.progress(55);
@@ -412,7 +436,7 @@ export class BrokerTest {
 
     const job = await broker.createJob({ sandbox: true });
 
-    await ewait(job, JobEvent.start);
+    await ewait(job, JobEvent.progress);
 
     const [result] = await ewait(job, JobEvent.done);
 
@@ -420,7 +444,7 @@ export class BrokerTest {
   }
 
   @AsyncTest()
-  async jobSandboxScriptError() {
+  async jobSandboxScriptFail() {
     worker.setContext(async (jh) => {
       jh.progress(55);
 
@@ -429,10 +453,47 @@ export class BrokerTest {
 
     const job = await broker.createJob({ sandbox: true });
 
-    await ewait(job, JobEvent.start);
+    await ewait(job, JobEvent.progress);
 
     const [result] = await ewait(job, JobEvent.fail);
 
     Expect(result).toBe('an error');
+  }
+
+  @AsyncTest()
+  async jobSandboxScriptExit() {
+    worker.setContext(async (jh) => {
+      jh.progress(55);
+
+      process.exit();
+    });
+
+    const job = await broker.createJob({ sandbox: true });
+
+    await ewait(job, JobEvent.progress);
+
+    const [result] = await ewait(job, JobEvent.fail);
+
+    Expect(result).toBe('exited');
+  }
+
+  @AsyncTest()
+  async jobSandboxScriptAbort() {
+    worker.setContext(async (jh) => {
+      jh.progress(55);
+
+      // NOTE: no fnwait in sandbox with callback ctx
+      await new Promise(resolve => setTimeout(resolve, 500)); // delay for abort
+    });
+
+    const job = await broker.createJob({ sandbox: true });
+
+    await ewait(job, JobEvent.progress);
+
+    worker.abort();
+
+    const [result] = await ewait(job, JobEvent.fail);
+
+    Expect(result).toBe('aborted');
   }
 }

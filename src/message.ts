@@ -10,6 +10,7 @@ export const enum Code {
   // broker => worker
   readyok,  // broker has registered worker
   assign,   // notify worker of job assignment
+  abort,    // abort current job
 
   // worker => broker
   ready,    // connected, ready to accept work

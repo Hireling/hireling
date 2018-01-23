@@ -69,7 +69,11 @@ export class Worker extends EventEmitter {
   private closingerr: Error|null = null;
   private retrytimer: NodeJS.Timer|null = null;
   private retries = 0;
-  private jobexec: ExecData|null = null;   // capture info current job/resume
+  private exec: {
+    data:     ExecData;
+    runner:   Runner;
+    canAbort: boolean;
+   }|null = null;
   private replay: M.Finish|null = null;    // sent on ready
   private strategy: ExecStrategy = 'exec'; // handling strategy for current job
   private readonly opt: WorkerOpt;
@@ -89,7 +93,7 @@ export class Worker extends EventEmitter {
     return {
       alive:   !!this.ws,
       closing: this.closing,
-      working: !!this.jobexec
+      working: !!this.exec
     };
   }
 
@@ -153,7 +157,7 @@ export class Worker extends EventEmitter {
 
     spinlock({
       ms:   this.opt.waitms,
-      test: () => force || !this.jobexec,
+      test: () => force || !this.exec,
       pre:  () => this.log.info('waiting on job to finish…')
     })
     .catch((err) => {
@@ -176,6 +180,20 @@ export class Worker extends EventEmitter {
     });
 
     return this;
+  }
+
+  abort() {
+    if (this.exec) {
+      if (this.exec.canAbort) {
+        this.exec.runner.abort();
+      }
+      else {
+        throw new Error('job cannot be aborted');
+      }
+    }
+    else {
+      throw new Error('worker has no job');
+    }
   }
 
   async pingBroker() {
@@ -202,11 +220,11 @@ export class Worker extends EventEmitter {
       this.opening = false;
       this.retries = 0;
 
-      if (this.jobexec) {
+      if (this.exec) {
         const resume: M.Resume = {
           id:   this.id,
           name: this.name,
-          job:  this.jobexec
+          job:  this.exec.data
         };
 
         await this.sendMsg(M.Code.resume, resume);
@@ -307,7 +325,7 @@ export class Worker extends EventEmitter {
 
       case M.Code.assign:
         return seq.run(async () => {
-          if (this.jobexec) {
+          if (this.exec) {
             this.log.error('worker already has a job', msg);
             return;
           }
@@ -315,6 +333,20 @@ export class Worker extends EventEmitter {
           const assign = msg.data as M.Assign;
 
           await this.run(assign.job);
+        });
+
+      case M.Code.abort:
+        return seq.run(async () => {
+          if (!this.exec) {
+            this.log.error('worker does not have a job', msg);
+            return;
+          }
+          else if (!this.exec.canAbort) {
+            this.log.error('worker cannot abort job', msg);
+            return;
+          }
+
+          this.abort();
         });
 
       default:
@@ -325,29 +357,31 @@ export class Worker extends EventEmitter {
   }
 
   private async run(job: JobAttr) {
+    this.log.info(`worker ${this.name} starting job ${job.name}`);
+
+    let result: any;
+    let status: 'done'|'failed';
+
     const exec: ExecData = {
       jobid:   job.id,
       started: new Date(),
       retries: job.retries
     };
 
-    this.jobexec = exec;
-
-    this.log.info(`worker ${this.name} starting job ${job.name}`);
-
-    this.event(WorkerEvent.jobstart);
-
-    const start: M.Start = { job: exec };
-
-    await this.sendMsg(M.Code.start, start);
-
-    let result: any;
-    let status: 'done'|'failed';
-
     try {
-      const runner = new Runner(this.ctx, job.sandbox);
+      this.exec = {
+        data:     exec,
+        runner:   new Runner(this.ctx, job.sandbox),
+        canAbort: job.sandbox
+      };
 
-      result = await runner.run({
+      this.event(WorkerEvent.jobstart);
+
+      const start: M.Start = { job: exec };
+
+      await this.sendMsg(M.Code.start, start);
+
+      result = await this.exec.runner.run({
         job,
         progress: async (progress) => {
           const prog: M.Progress = { job: exec, progress };
@@ -371,9 +405,9 @@ export class Worker extends EventEmitter {
       this.log.error('job error', err);
     }
 
-    const resumed = !!this.jobexec;
+    const resumed = !!this.exec;
 
-    this.jobexec = null;
+    this.exec = null;
     this.strategy = 'exec';
 
     this.event(WorkerEvent.jobfinish, { resumed }); // TODO: remove this prop
