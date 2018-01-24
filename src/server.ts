@@ -15,11 +15,11 @@ export const SERVER_DEFS = {
 export type ServerOpt = typeof SERVER_DEFS;
 
 export class Server {
-  readonly up: Signal = new Signal();
-  readonly down: Signal<Error|null> = new Signal();
-  readonly error: Signal<Error> = new Signal();
-  readonly workerup: Signal<Remote> = new Signal();
-  readonly workerdown: Signal<Remote> = new Signal();
+  readonly up         = new Signal();
+  readonly down       = new Signal<Error|null>();
+  readonly error      = new Signal<Error>();
+  readonly workerup   = new Signal<Remote>();
+  readonly workerdown = new Signal<Remote>();
 
   private server: WS.Server;
   private readonly opt: ServerOpt;

@@ -24,13 +24,13 @@ export interface JobAttr<T = any> {
 }
 
 export class Job<T = any> {
-  readonly start: Signal = new Signal();
-  readonly progress: Signal<number> = new Signal();
-  readonly done: Signal<T> = new Signal();
-  readonly fail: Signal = new Signal();
-  readonly expire: Signal = new Signal();
-  readonly stall: Signal = new Signal();
-  readonly retry: Signal = new Signal();
+  readonly start    = new Signal();
+  readonly progress = new Signal<number>();
+  readonly done     = new Signal<T>();
+  readonly fail     = new Signal();
+  readonly expire   = new Signal();
+  readonly stall    = new Signal();
+  readonly retry    = new Signal();
 
   readonly attr: JobAttr<T>;
   private expireTimer: NodeJS.Timer|null;

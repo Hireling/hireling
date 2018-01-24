@@ -25,13 +25,10 @@ export function mergeOpt(tgt: object = {}, src: object = {}) {
   return def;
 }
 
-export async function swait<T>(e: Signal<T>) {
-  return new Promise<T>(resolve => e.once((...args: any[]) => resolve(...args)));
-}
+export const swait = <T>(e: Signal<T>) => new Promise<T>(e.once.bind(e));
 
-export async function fnwait(ms: number, fn = () => undefined as any) {
-  return new Promise(resolve => setTimeout(() => resolve(fn()), ms));
-}
+export const fnwait = (ms: number, fn = () => undefined as any) =>
+  new Promise(resolve => setTimeout(() => resolve(fn()), ms));
 
 export interface SpinlockOpt {
   ms?:    number;        // post-spin delay, in ms

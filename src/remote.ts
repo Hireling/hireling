@@ -8,14 +8,14 @@ import { Signal } from './signal';
 
 // broker's view of a remote worker and socket
 export class Remote {
-  readonly meta: Signal<M.Data> = new Signal();
-  readonly ping: Signal = new Signal();
-  readonly pong: Signal = new Signal();
-  readonly ready: Signal<M.Ready> = new Signal();
-  readonly resume: Signal<M.Resume> = new Signal();
-  readonly start: Signal<M.Start> = new Signal();
-  readonly progress: Signal<M.Progress> = new Signal();
-  readonly finish: Signal<M.Finish> = new Signal();
+  readonly meta     = new Signal<M.Data>();
+  readonly ping     = new Signal();
+  readonly pong     = new Signal();
+  readonly ready    = new Signal<M.Ready>();
+  readonly resume   = new Signal<M.Resume>();
+  readonly start    = new Signal<M.Start>();
+  readonly progress = new Signal<M.Progress>();
+  readonly finish   = new Signal<M.Finish>();
 
   readonly id: WorkerId;
   readonly name: string;

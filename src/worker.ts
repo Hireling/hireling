@@ -42,11 +42,11 @@ export const WORKER_DEFS = {
 export type WorkerOpt = typeof WORKER_DEFS;
 
 export class Worker {
-  readonly up: Signal = new Signal();
-  readonly down: Signal<Error|null> = new Signal();
-  readonly jobstart: Signal = new Signal();
-  readonly jobprogress: Signal<number> = new Signal();
-  readonly jobfinish: Signal<{ resumed: boolean }> = new Signal();
+  readonly up          = new Signal();
+  readonly down        = new Signal<Error|null>();
+  readonly jobstart    = new Signal();
+  readonly jobprogress = new Signal<number>();
+  readonly jobfinish   = new Signal<{ resumed: boolean }>();
 
   readonly id: WorkerId;
   readonly name: string;

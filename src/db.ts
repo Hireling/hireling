@@ -4,8 +4,8 @@ import { Logger, LogLevel } from './logger';
 import { Signal } from './signal';
 
 export abstract class Db {
-  readonly up: Signal = new Signal();
-  readonly down: Signal<Error|null> = new Signal();
+  readonly up   = new Signal();
+  readonly down = new Signal<Error|null>();
 
   protected readonly log = new Logger(Db.name);
 

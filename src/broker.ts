@@ -47,13 +47,13 @@ export const BROKER_DEFS = {
 export type BrokerOpt = typeof BROKER_DEFS;
 
 export class Broker {
-  readonly up: Signal = new Signal();
-  readonly down: Signal<Error|null> = new Signal();
-  readonly error: Signal<Error> = new Signal();
-  readonly workerjoin: Signal = new Signal();
-  readonly workerpart: Signal = new Signal();
-  readonly full: Signal = new Signal();
-  readonly drain: Signal = new Signal();
+  readonly up         = new Signal();
+  readonly down       = new Signal<Error|null>();
+  readonly error      = new Signal<Error>();
+  readonly workerjoin = new Signal();
+  readonly workerpart = new Signal();
+  readonly full       = new Signal();
+  readonly drain      = new Signal();
 
   private opening = false;
   private closing = false;
