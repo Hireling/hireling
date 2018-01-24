@@ -1,22 +1,12 @@
-import { EventEmitter } from 'events';
 import { JobAttr, JobStatus, JobId } from './job';
 import { WorkerId } from './worker';
 import { Logger, LogLevel } from './logger';
-import { NoopHandler } from './util';
+import { Signal } from './signal';
 
-export const enum DbEvent {
-  open  = 'open',
-  close = 'close'
-}
+export abstract class Db {
+  readonly up: Signal = new Signal();
+  readonly down: Signal<Error|null> = new Signal();
 
-// tslint:disable:unified-signatures
-export declare interface Db {
-  on(e: DbEvent.open|'open', fn: NoopHandler): this;
-  on(e: DbEvent.close|'close', fn: NoopHandler): this;
-}
-// tslint:enable:unified-signatures
-
-export abstract class Db extends EventEmitter {
   protected readonly log = new Logger(Db.name);
 
   set logLevel(val: LogLevel) {
@@ -42,12 +32,6 @@ export abstract class Db extends EventEmitter {
   abstract remove(query: Partial<JobAttr>): Promise<number>;
 
   abstract clear(): Promise<number>;
-
-  protected event(e: DbEvent, ...args: any[]) {
-    setImmediate(() => {
-      this.emit(e, ...args);
-    });
-  }
 }
 
 export class MemoryEngine extends Db {
@@ -62,13 +46,13 @@ export class MemoryEngine extends Db {
   open() {
     this.log.debug('opened');
 
-    this.event(DbEvent.open);
+    this.up.event();
   }
 
   close(force = false) {
     this.log.warn(`closing - ${force ? 'forced' : 'graceful'}`);
 
-    this.event(DbEvent.close);
+    this.down.event(null);
   }
 
   async add(job: JobAttr) {

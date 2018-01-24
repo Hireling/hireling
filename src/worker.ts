@@ -1,12 +1,12 @@
-import { EventEmitter } from 'events';
 import * as uuid from 'uuid';
 import * as WS from 'ws';
 import * as M from './message';
 import { Serializer } from './serializer';
 import { Logger, LogLevel } from './logger';
 import { JobId, JobAttr } from './job';
-import { spinlock, mergeOpt, NoopHandler, SeqLock } from './util';
+import { spinlock, mergeOpt, SeqLock } from './util';
 import { Runner } from './runner';
+import { Signal } from './signal';
 
 export interface JobHandle<T = any> {
   job:      JobAttr<T>;
@@ -41,25 +41,13 @@ export const WORKER_DEFS = {
 
 export type WorkerOpt = typeof WORKER_DEFS;
 
-export const enum WorkerEvent {
-  start       = 'start',
-  stop        = 'stop',
-  jobstart    = 'jobstart',
-  jobprogress = 'jobprogress',
-  jobfinish   = 'jobfinish'
-}
+export class Worker {
+  readonly up: Signal = new Signal();
+  readonly down: Signal<Error|null> = new Signal();
+  readonly jobstart: Signal = new Signal();
+  readonly jobprogress: Signal<number> = new Signal();
+  readonly jobfinish: Signal<{ resumed: boolean }> = new Signal();
 
-// tslint:disable:unified-signatures
-export declare interface Worker {
-  on(e: WorkerEvent.start|'start', fn: NoopHandler): this;
-  on(e: WorkerEvent.stop|'stop', fn: NoopHandler): this;
-  on(e: WorkerEvent.jobstart|'jobstart', fn: NoopHandler): this;
-  on(e: WorkerEvent.jobprogress|'jobprogress', fn: NoopHandler): this;
-  on(e: WorkerEvent.jobfinish|'jobfinish', fn: NoopHandler): this;
-}
-// tslint:enable:unified-signatures
-
-export class Worker extends EventEmitter {
   readonly id: WorkerId;
   readonly name: string;
   private ws: WS|null;
@@ -80,8 +68,6 @@ export class Worker extends EventEmitter {
   private readonly log = new Logger(Worker.name);
 
   constructor(opt?: Partial<WorkerOpt>, ctx: JobContext|string = noopjob) {
-    super();
-
     this.opt = mergeOpt(WORKER_DEFS, opt) as WorkerOpt;
     this.id = uuid.v4() as WorkerId;
     this.name = this.opt.name;
@@ -117,7 +103,7 @@ export class Worker extends EventEmitter {
     }
     else if (this.ws) {
       this.log.warn('worker is already running');
-      this.event(WorkerEvent.start);
+      this.up.event();
       return this;
     }
 
@@ -144,7 +130,7 @@ export class Worker extends EventEmitter {
     }
     else if (!this.ws) {
       this.log.warn('worker is not running');
-      this.event(WorkerEvent.stop);
+      this.down.event(null);
       return this;
     }
 
@@ -173,7 +159,7 @@ export class Worker extends EventEmitter {
 
       this.closing = false;
 
-      this.event(WorkerEvent.stop, this.closingerr);
+      this.down.event(this.closingerr);
     })
     .catch(() => {
       // for linter
@@ -255,7 +241,7 @@ export class Worker extends EventEmitter {
         this.ws = null;
       }
 
-      this.event(WorkerEvent.stop);
+      this.down.event(null);
 
       if (!this.closing) {
         this.log.info('reconnecting');
@@ -320,7 +306,7 @@ export class Worker extends EventEmitter {
 
           this.log.debug(`${this.name} got readyok (strategy: ${m.strategy})`);
 
-          this.event(WorkerEvent.start);
+          this.up.event();
         });
 
       case M.Code.assign:
@@ -375,7 +361,7 @@ export class Worker extends EventEmitter {
         canAbort: job.sandbox
       };
 
-      this.event(WorkerEvent.jobstart);
+      this.jobstart.event();
 
       const start: M.Start = { job: exec };
 
@@ -384,9 +370,9 @@ export class Worker extends EventEmitter {
       result = await this.exec.runner.run({
         job,
         progress: async (progress) => {
-          const prog: M.Progress = { job: exec, progress };
+          this.jobprogress.event(progress);
 
-          this.event(WorkerEvent.jobprogress, prog);
+          const prog: M.Progress = { job: exec, progress };
 
           await this.sendMsg(M.Code.progress, prog);
         }
@@ -410,7 +396,7 @@ export class Worker extends EventEmitter {
     this.exec = null;
     this.strategy = 'exec';
 
-    this.event(WorkerEvent.jobfinish, { resumed }); // TODO: remove this prop
+    this.jobfinish.event({ resumed }); // TODO: remove this prop
 
     const finish: M.Finish = { job: exec, status, result };
 
@@ -462,12 +448,6 @@ export class Worker extends EventEmitter {
           return resolve(true);
         }
       });
-    });
-  }
-
-  private event(e: WorkerEvent, ...args: any[]) {
-    setImmediate(() => {
-      this.emit(e, ...args);
     });
   }
 }

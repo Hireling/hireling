@@ -1,13 +1,13 @@
-import { EventEmitter } from 'events';
 import * as uuid from 'uuid';
 import * as M from './message';
 import { WorkerId, ExecStrategy, ExecData } from './worker';
 import { Logger, LogLevel } from './logger';
-import { Job, JobStatus, JobEvent, JobAttr, JobId } from './job';
-import { spinlock, TopPartial, mergeOpt, NoopHandler, SeqLock } from './util';
-import { Db, DbEvent, MemoryEngine } from './db';
-import { Server, ServerEvent, SERVER_DEFS } from './server';
-import { Remote, RemoteEvent } from './remote';
+import { Job, JobStatus, JobAttr, JobId } from './job';
+import { spinlock, TopPartial, mergeOpt, SeqLock } from './util';
+import { Db, MemoryEngine } from './db';
+import { Server, SERVER_DEFS } from './server';
+import { Remote } from './remote';
+import { Signal } from './signal';
 
 export interface JobCreate<T = any> {
   name?:     string;
@@ -46,29 +46,15 @@ export const BROKER_DEFS = {
 
 export type BrokerOpt = typeof BROKER_DEFS;
 
-export const enum BrokerEvent {
-  start      = 'start',
-  stop       = 'stop',
-  error      = 'error',
-  workerjoin = 'workerjoin',
-  workerpart = 'workerpart',
-  full       = 'full',       // all workers busy
-  drain      = 'drain'       // queue drained, no jobs remain
-}
+export class Broker {
+  readonly up: Signal = new Signal();
+  readonly down: Signal<Error|null> = new Signal();
+  readonly error: Signal<Error> = new Signal();
+  readonly workerjoin: Signal = new Signal();
+  readonly workerpart: Signal = new Signal();
+  readonly full: Signal = new Signal();
+  readonly drain: Signal = new Signal();
 
-// tslint:disable:unified-signatures
-export declare interface Broker {
-  on(e: BrokerEvent.start|'start', fn: NoopHandler): this;
-  on(e: BrokerEvent.stop|'stop', fn: NoopHandler): this;
-  on(e: BrokerEvent.error|'error', fn: NoopHandler): this;
-  on(e: BrokerEvent.workerjoin|'workerjoin', fn: NoopHandler): this;
-  on(e: BrokerEvent.workerpart|'workerpart', fn: NoopHandler): this;
-  on(e: BrokerEvent.full|'full', fn: NoopHandler): this;
-  on(e: BrokerEvent.drain|'drain', fn: NoopHandler): this;
-}
-// tslint:enable:unified-signatures
-
-export class Broker extends EventEmitter {
   private opening = false;
   private closing = false;
   private closingerr: Error|null = null;
@@ -87,8 +73,6 @@ export class Broker extends EventEmitter {
   private readonly logJob = new Logger(Job.name); // shared instance
 
   constructor(opt?: TopPartial<BrokerOpt>) {
-    super();
-
     this.opt = mergeOpt(BROKER_DEFS, opt) as BrokerOpt;
     this.logLevel = this.opt.log;
 
@@ -119,7 +103,7 @@ export class Broker extends EventEmitter {
     }
     else if (this.dbopen && this.serveropen) {
       this.log.warn('broker is already running');
-      this.event(BrokerEvent.start);
+      this.up.event();
       return this;
     }
 
@@ -151,7 +135,7 @@ export class Broker extends EventEmitter {
     }
     else if (!this.dbopen && !this.serveropen) {
       this.log.warn('broker is not running');
-      this.event(BrokerEvent.stop);
+      this.down.event(null);
       return this;
     }
 
@@ -210,7 +194,7 @@ export class Broker extends EventEmitter {
     // this.jobs.clear();
   }
 
-  async createJob<T>(opt: JobCreate<T> = {}) {
+  async createJob<T = any>(opt: JobCreate<T> = {}) {
     if (this.closing) {
       throw new Error('broker is closing');
     }
@@ -237,7 +221,7 @@ export class Broker extends EventEmitter {
         worker.lock = false;
       }
       else {
-        this.event(BrokerEvent.full);
+        this.full.event();
         this.log.info('no workers available for assignment');
 
         // no worker available, assign job later
@@ -263,7 +247,7 @@ export class Broker extends EventEmitter {
       .find(w => !w.job && !w.lock && !w.lockStart && !w.closing);
 
     if (!worker) {
-      this.event(BrokerEvent.full);
+      this.full.event();
       this.log.info('no workers available for assignment');
       return false;
     }
@@ -396,7 +380,7 @@ export class Broker extends EventEmitter {
 
     db.logLevel = this.opt.db.log;
 
-    db.on(DbEvent.open, async () => {
+    db.up.on(async () => {
       this.log.debug('db open');
 
       if (this.dbopen) {
@@ -445,15 +429,15 @@ export class Broker extends EventEmitter {
         if (this.serveropen) {
           this.opening = false;
 
-          this.event(BrokerEvent.start);
+          this.up.event();
         }
       }
       else {
-        this.event(BrokerEvent.start);
+        this.up.event();
       }
     });
 
-    db.on(DbEvent.close, () => {
+    db.down.on(() => {
       this.log.debug('db close');
 
       this.dbopen = false;
@@ -464,11 +448,11 @@ export class Broker extends EventEmitter {
         if (!this.serveropen) {
           this.closing = false;
 
-          this.event(BrokerEvent.stop, this.closingerr);
+          this.down.event(this.closingerr);
         }
       }
       else {
-        this.event(BrokerEvent.stop, this.closingerr);
+        this.down.event(this.closingerr);
 
         this.log.info('reconnecting');
 
@@ -501,7 +485,7 @@ export class Broker extends EventEmitter {
   private makeServer() {
     const server = new Server(this.opt.server);
 
-    server.on(ServerEvent.start, () => {
+    server.up.on(() => {
       this.log.debug('server start');
 
       if (this.serveropen) {
@@ -514,11 +498,11 @@ export class Broker extends EventEmitter {
       if (this.opening && this.dbopen) {
         this.opening = false;
 
-        this.event(BrokerEvent.start);
+        this.up.event();
       }
     });
 
-    server.on(ServerEvent.stop, () => {
+    server.down.on(() => {
       this.log.debug('server stop');
 
       if (!this.serveropen) {
@@ -531,26 +515,26 @@ export class Broker extends EventEmitter {
       if (this.closing && !this.dbopen) {
         this.closing = false;
 
-        this.event(BrokerEvent.stop, this.closingerr);
+        this.down.event(this.closingerr);
       }
     });
 
-    server.on(ServerEvent.error, (err: Error) => {
+    server.error.on((err) => {
       this.log.debug('server error', err);
 
       this.serveropen = false;
 
-      this.event(BrokerEvent.error, err);
+      this.error.event(err);
     });
 
-    server.on(ServerEvent.workerconnect, (worker: Remote) => {
+    server.workerup.on((worker) => {
       this.receiveWorker(worker);
     });
 
-    server.on(ServerEvent.workerdisconnect, (worker: Remote) => {
+    server.workerdown.on((worker) => {
       this.workers.splice(this.workers.indexOf(worker), 1);
 
-      this.event(BrokerEvent.workerpart);
+      this.workerpart.event();
     });
 
     return server;
@@ -559,13 +543,13 @@ export class Broker extends EventEmitter {
   private receiveWorker(worker: Remote) {
     const seq = new SeqLock(true); // process requests sequentially
 
-    worker.on(RemoteEvent.meta, async () => {
+    worker.meta.on(async () => {
       return seq.run(async () => {
         this.log.debug(`meta from ${worker.name}`);
       });
     });
 
-    worker.on(RemoteEvent.ping, async () => {
+    worker.ping.on(async () => {
       return seq.run(async () => {
         this.log.debug(`ping from ${worker.name}`);
 
@@ -573,13 +557,13 @@ export class Broker extends EventEmitter {
       });
     });
 
-    worker.on(RemoteEvent.pong, async () => {
+    worker.pong.on(async () => {
       return seq.run(async () => {
         this.log.debug(`pong from ${worker.name}`);
       });
     });
 
-    worker.on(RemoteEvent.ready, async (msg: M.Ready) => {
+    worker.ready.on(async (msg) => {
       return seq.run(async () => {
         const replay = msg.replay;
 
@@ -608,7 +592,7 @@ export class Broker extends EventEmitter {
 
           this.workers.push(worker);
 
-          this.event(BrokerEvent.workerjoin);
+          this.workerjoin.event();
 
           if (!this.opt.manual) {
             await this.reserveJob(worker);
@@ -617,7 +601,7 @@ export class Broker extends EventEmitter {
       });
     });
 
-    worker.on(RemoteEvent.resume, async (msg: M.Resume) => {
+    worker.resume.on(async (msg) => {
       return seq.run(async () => {
         const job = await this.resumeJob(worker.id, msg.job, 'resume');
 
@@ -641,12 +625,12 @@ export class Broker extends EventEmitter {
 
           this.workers.push(worker);
 
-          this.event(BrokerEvent.workerjoin);
+          this.workerjoin.event();
         }
       });
     });
 
-    worker.on(RemoteEvent.start, async (msg: M.Start) => {
+    worker.start.on(async (msg) => {
       return seq.run(async () => {
         const job = await this.resumeJob(worker.id, msg.job, 'start');
 
@@ -660,11 +644,11 @@ export class Broker extends EventEmitter {
           await this.updateJob(job, update);
         }
 
-        job.event(JobEvent.start);
+        job.start.event();
       });
     });
 
-    worker.on(RemoteEvent.progress, async (msg: M.Progress) => {
+    worker.progress.on(async (msg) => {
       return seq.run(async () => {
         const job = await this.resumeJob(worker.id, msg.job, 'progress');
 
@@ -678,11 +662,11 @@ export class Broker extends EventEmitter {
           await this.updateJob(job, update);
         }
 
-        job.event(JobEvent.progress, msg.progress);
+        job.progress.event(msg.progress);
       });
     });
 
-    worker.on(RemoteEvent.finish, async (msg: M.Finish) => {
+    worker.finish.on(async (msg) => {
       return seq.run(async () => {
         const job = await this.resumeJob(worker.id, msg.job, 'finish');
 
@@ -772,7 +756,7 @@ export class Broker extends EventEmitter {
         assigned = await this.assignJob(worker, job);
       }
       else {
-        this.event(BrokerEvent.drain);
+        this.drain.event();
       }
     }
     catch (err) {
@@ -851,13 +835,13 @@ export class Broker extends EventEmitter {
       this.log.warn(`job ${job.attr.name} => ${update.status}${reason}`);
 
       if (update.status === 'done') {
-        job.event(JobEvent.done, msg.result);
+        job.done.event(msg.result);
       }
       else if (update.status === 'failed') {
-        job.event(JobEvent.fail, msg.result);
+        job.fail.event(msg.result);
       }
       else if (update.status === 'ready') {
-        job.event(JobEvent.retry, msg.result);
+        job.retry.event(msg.result);
       }
 
       return true;
@@ -878,9 +862,9 @@ export class Broker extends EventEmitter {
 
     this.jobs.set(job.attr.id, job);
 
-    job.on('expire', async () => this.expireJob(job));
+    job.expire.on(async () => this.expireJob(job));
 
-    job.on('stall', async () => this.stallJob(job));
+    job.stall.on(async () => this.stallJob(job));
 
     return job;
   }
@@ -954,11 +938,5 @@ export class Broker extends EventEmitter {
     }
 
     return true;
-  }
-
-  private event(e: BrokerEvent, ...args: any[]) {
-    setImmediate(() => {
-      this.emit(e, ...args);
-    });
   }
 }

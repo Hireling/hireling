@@ -1,14 +1,8 @@
-import { EventEmitter } from 'events';
-import { Broker, BrokerEvent } from './broker';
-import { Worker, WorkerEvent } from './worker';
-import { Job, JobEvent } from './job';
+import { Signal } from './signal';
 
 export type TopPartial<T> = {
   [P in keyof T]?: Partial<T[P]>;
 };
-
-// TODO: remove this
-export type NoopHandler = (...args: any[]) => void;
 
 // merge options recursively, ignore undefined keys
 export function mergeOpt(tgt: object = {}, src: object = {}) {
@@ -31,11 +25,8 @@ export function mergeOpt(tgt: object = {}, src: object = {}) {
   return def;
 }
 
-export async function ewait(tgt: Broker, e: BrokerEvent): Promise<any[]>;
-export async function ewait(tgt: Worker, e: WorkerEvent): Promise<any[]>;
-export async function ewait(tgt: Job, e: JobEvent): Promise<any[]>;
-export async function ewait(tgt: EventEmitter, e: string) {
-  return new Promise<any[]>(resolve => tgt.once(e, (...args) => resolve(args)));
+export async function swait<T>(e: Signal<T>) {
+  return new Promise<T>(resolve => e.once((...args: any[]) => resolve(...args)));
 }
 
 export async function fnwait(ms: number, fn = () => undefined as any) {

@@ -1,10 +1,9 @@
 import {
   TestFixture, AsyncTeardownFixture, AsyncSetup, AsyncTeardown, AsyncTest, Expect
 } from 'alsatian';
-import { Broker, BrokerEvent } from '../src/broker';
-import { Worker, WorkerEvent, JobContext } from '../src/worker';
-import { JobEvent } from '../src/job';
-import { ewait } from '../src/util';
+import { Broker } from '../src/broker';
+import { Worker, JobContext } from '../src/worker';
+import { swait } from '../src/util';
 import { brokerCfg, workerCfg } from './fixture/cfg';
 
 let broker: Broker;
@@ -50,13 +49,13 @@ export class MessageTest {
 
     broker.start();
 
-    await ewait(broker, BrokerEvent.start);
+    await swait(broker.up);
 
     await broker.clearJobs();
 
     broker.stop();
 
-    await ewait(broker, BrokerEvent.stop);
+    await swait(broker.down);
   }
 
   @AsyncSetup
@@ -65,31 +64,31 @@ export class MessageTest {
 
     broker.start();
 
-    await ewait(broker, BrokerEvent.start);
+    await swait(broker.up);
 
     await broker.clearJobs();
 
     worker = new Worker(workerCfg, echoWork).start();
 
-    await ewait(broker, BrokerEvent.drain);
+    await swait(broker.drain);
   }
 
   @AsyncTeardown
   async teardown() {
     worker.stop();
 
-    await ewait(worker, WorkerEvent.stop);
+    await swait(worker.down);
 
     broker.stop();
 
-    await ewait(broker, BrokerEvent.stop);
+    await swait(broker.down);
   }
 
   @AsyncTest()
   async differentOutput() {
     const job = await broker.createJob({ data: { a: 'b' } });
 
-    const [result] = await ewait(job, JobEvent.done);
+    const result = await swait(job.done);
 
     Expect(result).not.toEqual({ a: 'c' });
   }
@@ -98,7 +97,7 @@ export class MessageTest {
   async complexWorkData() {
     const job = await broker.createJob({ data: complexDataIn });
 
-    const [result] = await ewait(job, JobEvent.done);
+    const result = await swait(job.done);
 
     Expect(result).toEqual(complexDataOut);
   }
@@ -107,7 +106,7 @@ export class MessageTest {
   async nanPassthrough() {
     const job = await broker.createJob({ data: nanData });
 
-    const [result] = await ewait(job, JobEvent.done);
+    const result = await swait(job.done);
 
     Expect(Number.isNaN(result.a)).toBe(true);
   }
@@ -120,7 +119,7 @@ export class MessageTest {
       data: { a: new Date(dateToStr) }
     });
 
-    const [result] = await ewait(job, JobEvent.done);
+    const result = await swait(job.done);
 
     Expect((result.a as Date).toISOString()).toBe(dateToStr);
   }

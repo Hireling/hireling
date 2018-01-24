@@ -1,8 +1,8 @@
 import {
   TestFixture, AsyncTeardownFixture, AsyncSetup, AsyncTeardown, AsyncTest, Expect
 } from 'alsatian';
-import { Broker, BrokerEvent } from '../src/broker';
-import { ewait } from '../src/util';
+import { Broker } from '../src/broker';
+import { swait } from '../src/util';
 import { brokerCfg } from './fixture/cfg';
 
 let broker: Broker;
@@ -15,13 +15,13 @@ export class JobTest {
 
     broker.start();
 
-    await ewait(broker, BrokerEvent.start);
+    await swait(broker.up);
 
     await broker.clearJobs();
 
     broker.stop();
 
-    await ewait(broker, BrokerEvent.stop);
+    await swait(broker.down);
   }
 
   @AsyncSetup
@@ -30,7 +30,7 @@ export class JobTest {
 
     broker.start();
 
-    await ewait(broker, BrokerEvent.start);
+    await swait(broker.up);
 
     await broker.clearJobs();
   }
@@ -39,7 +39,7 @@ export class JobTest {
   async teardown() {
     broker.stop();
 
-    await ewait(broker, BrokerEvent.stop);
+    await swait(broker.down);
   }
 
   @AsyncTest()
@@ -59,14 +59,14 @@ export class JobTest {
 
     await Expect(async () => broker.createJob()).toThrowAsync();
 
-    await ewait(broker, BrokerEvent.stop);
+    await swait(broker.down);
   }
 
   @AsyncTest()
   async addJobErrorOnClosed() {
     broker.stop();
 
-    await ewait(broker, BrokerEvent.stop);
+    await swait(broker.down);
 
     await Expect(async () => broker.createJob()).toThrowAsync();
   }
@@ -75,11 +75,11 @@ export class JobTest {
   async addJobAfterResume() {
     broker.stop();
 
-    await ewait(broker, BrokerEvent.stop);
+    await swait(broker.down);
 
     broker.start();
 
-    await ewait(broker, BrokerEvent.start);
+    await swait(broker.up);
 
     await broker.createJob();
 

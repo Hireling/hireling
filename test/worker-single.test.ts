@@ -1,10 +1,9 @@
 import {
   TestFixture, AsyncTeardownFixture, AsyncSetup, AsyncTeardown, AsyncTest, Expect, SpyOn, Timeout
 } from 'alsatian';
-import { Broker, BrokerEvent } from '../src/broker';
-import { Worker, WorkerEvent, JobContext } from '../src/worker';
-import { JobEvent } from '../src/job';
-import { ewait, fnwait } from '../src/util';
+import { Broker } from '../src/broker';
+import { Worker, JobContext } from '../src/worker';
+import { fnwait, swait } from '../src/util';
 import { brokerCfg, workerCfg } from './fixture/cfg';
 
 let broker: Broker;
@@ -20,13 +19,13 @@ export class BrokerTest {
 
     broker.start();
 
-    await ewait(broker, BrokerEvent.start);
+    await swait(broker.up);
 
     await broker.clearJobs();
 
     broker.stop();
 
-    await ewait(broker, BrokerEvent.stop);
+    await swait(broker.down);
   }
 
   @AsyncSetup
@@ -35,24 +34,24 @@ export class BrokerTest {
 
     broker.start();
 
-    await ewait(broker, BrokerEvent.start);
+    await swait(broker.up);
 
     await broker.clearJobs();
 
     worker = new Worker(workerCfg, echoWork).start();
 
-    await ewait(broker, BrokerEvent.drain);
+    await swait(broker.drain);
   }
 
   @AsyncTeardown
   async teardown() {
     worker.stop();
 
-    await ewait(worker, WorkerEvent.stop);
+    await swait(worker.down);
 
     broker.stop();
 
-    await ewait(broker, BrokerEvent.stop);
+    await swait(broker.down);
   }
 
   @AsyncTest()
@@ -64,7 +63,7 @@ export class BrokerTest {
   async stopWithWorker() {
     broker.stop();
 
-    await ewait(broker, BrokerEvent.stop);
+    await swait(broker.down);
 
     Expect(broker.report.workers).toBe(0);
   }
@@ -81,7 +80,7 @@ export class BrokerTest {
 
     Expect(() => worker.stop()).not.toThrow();
 
-    await ewait(worker, WorkerEvent.stop);
+    await swait(worker.down);
   }
 
   @AsyncTest()
@@ -106,7 +105,7 @@ export class BrokerTest {
   async pingUnreachable() {
     broker.stop();
 
-    await ewait(worker, WorkerEvent.stop);
+    await swait(worker.down);
 
     const ms = await worker.pingBroker();
 
@@ -119,7 +118,7 @@ export class BrokerTest {
   async brokerPingClosed() {
     worker.stop();
 
-    await ewait(broker, BrokerEvent.workerpart);
+    await swait(broker.workerpart);
 
     const pings = await broker.pingWorkers();
 
@@ -132,11 +131,11 @@ export class BrokerTest {
   async stopResumeWithWorker() {
     broker.stop();
 
-    await ewait(broker, BrokerEvent.stop);
+    await swait(broker.down);
 
     broker.start();
 
-    await ewait(broker, BrokerEvent.drain);
+    await swait(broker.drain);
 
     Expect(broker.report.workers).toBe(1);
   }
@@ -145,7 +144,7 @@ export class BrokerTest {
   async workerSimpleJob1() {
     const job = await broker.createJob({ data: { a: 'b' } });
 
-    const [result] = await ewait(job, JobEvent.done);
+    const result = await swait(job.done);
 
     Expect(result).toEqual({ a: 'b' });
   }
@@ -154,7 +153,7 @@ export class BrokerTest {
   async workerSimpleJob2() {
     const job = await broker.createJob({ data: { a: 'b' } });
 
-    const [result] = await ewait(job, JobEvent.done);
+    const result = await swait(job.done);
 
     Expect(result).not.toEqual({ a: 'c' });
   }
@@ -169,11 +168,11 @@ export class BrokerTest {
 
     await broker.createJob();
 
-    await ewait(worker, WorkerEvent.jobprogress);
+    await swait(worker.jobprogress);
 
     broker.stop();
 
-    await ewait(broker, BrokerEvent.stop);
+    await swait(broker.down);
 
     Expect(worker.report.working).toBe(false);
   }
@@ -188,15 +187,15 @@ export class BrokerTest {
 
     await broker.createJob();
 
-    await ewait(worker, WorkerEvent.jobprogress);
+    await swait(worker.jobprogress);
 
     broker.stop(true);
 
-    await ewait(broker, BrokerEvent.stop);
+    await swait(broker.down);
 
     Expect(worker.report.working).toBe(true);
 
-    await ewait(worker, WorkerEvent.jobfinish);
+    await swait(worker.jobfinish);
   }
 
   @Timeout(1000)
@@ -209,21 +208,21 @@ export class BrokerTest {
 
     broker.stop();
 
-    await ewait(broker, BrokerEvent.stop);
+    await swait(broker.down);
 
     broker = new Broker({ ...brokerCfg, closems: 1 });
 
     broker.start();
 
-    await ewait(broker, BrokerEvent.drain);
+    await swait(broker.drain);
 
     await broker.createJob();
 
-    await ewait(worker, WorkerEvent.jobprogress);
+    await swait(worker.jobprogress);
 
     broker.stop();
 
-    const [result] = await ewait(broker, BrokerEvent.stop);
+    const result = await swait(broker.down);
 
     Expect(result instanceof Error).toBe(true);
   }
@@ -239,15 +238,15 @@ export class BrokerTest {
 
     const j1 = await broker.createJob();
 
-    j1.on(JobEvent.progress, spy.onProgress);
+    j1.progress.on(spy.onProgress);
 
     const j2 = await broker.createJob();
 
-    j2.on(JobEvent.progress, spy.onProgress);
+    j2.progress.on(spy.onProgress);
 
     await Promise.all([
-      ewait(j1, JobEvent.done),
-      ewait(j2, JobEvent.done)
+      swait(j1.done),
+      swait(j2.done)
     ]);
 
     Expect(spy.onProgress).toHaveBeenCalled().exactly(2);
@@ -257,20 +256,20 @@ export class BrokerTest {
   async jobAfterConnect() {
     worker.stop();
 
-    await ewait(worker, WorkerEvent.stop);
+    await swait(worker.down);
 
     const job = await broker.createJob();
 
     const spy = { onProgress() {} };
     SpyOn(spy, 'onProgress');
 
-    job.on(JobEvent.progress, spy.onProgress);
+    job.progress.on(spy.onProgress);
 
     worker = new Worker(workerCfg, async (jh) => {
       jh.progress(10);
     }).start();
 
-    await ewait(job, JobEvent.done);
+    await swait(job.done);
 
     Expect(spy.onProgress).toHaveBeenCalled().exactly(1);
   }
@@ -291,9 +290,9 @@ export class BrokerTest {
 
     const job = await broker.createJob();
 
-    job.on(JobEvent.progress, spy.onProgress);
+    job.progress.on(spy.onProgress);
 
-    await ewait(job, JobEvent.done);
+    await swait(job.done);
 
     Expect(spy.onProgress).toHaveBeenCalled().exactly(2);
   }
@@ -311,9 +310,9 @@ export class BrokerTest {
 
     const job = await broker.createJob();
 
-    job.on(JobEvent.fail, spy.onFail);
+    job.fail.on(spy.onFail);
 
-    await ewait(job, JobEvent.fail);
+    await swait(job.fail);
 
     Expect(spy.onFail).toHaveBeenCalled().exactly(1);
   }
@@ -331,21 +330,21 @@ export class BrokerTest {
 
     const job = await broker.createJob();
 
-    await ewait(job, JobEvent.progress);
+    await swait(job.progress);
 
     broker.stop(true);
 
     // allow worker to save message for replay
-    await ewait(worker, WorkerEvent.jobfinish);
+    await swait(worker.jobfinish);
 
     const spy = { onDone() {} };
     SpyOn(spy, 'onDone');
 
-    job.on(JobEvent.done, spy.onDone);
+    job.done.on(spy.onDone);
 
     broker.start();
 
-    await ewait(worker, WorkerEvent.start);
+    await swait(worker.up);
 
     Expect(spy.onDone).toHaveBeenCalled().exactly(1);
   }
@@ -363,15 +362,15 @@ export class BrokerTest {
 
     const job = await broker.createJob();
 
-    await ewait(job, JobEvent.progress);
+    await swait(job.progress);
 
     broker.stop(true);
 
-    await ewait(broker, BrokerEvent.stop);
+    await swait(broker.down);
 
     broker.start();
 
-    const [result] = await ewait(worker, WorkerEvent.jobfinish);
+    const result = await swait(worker.jobfinish);
 
     Expect(result.resumed).toBe(true);
   }
@@ -380,11 +379,11 @@ export class BrokerTest {
   async jobSandboxPathOk() {
     worker.setContext(`${__dirname}/fixture/ctx-ok`);
 
-    const job = await broker.createJob({ sandbox: true });
+    const job = await broker.createJob<number>({ sandbox: true });
 
-    await ewait(job, JobEvent.progress);
+    await swait(job.progress);
 
-    const [result] = await ewait(job, JobEvent.done);
+    const result = await swait(job.done);
 
     Expect(result).toBe(555);
   }
@@ -395,9 +394,9 @@ export class BrokerTest {
 
     const job = await broker.createJob({ sandbox: true });
 
-    await ewait(job, JobEvent.progress);
+    await swait(job.progress);
 
-    const [result] = await ewait(job, JobEvent.fail);
+    const result = await swait(job.fail);
 
     Expect(result).toBe('an error');
   }
@@ -406,11 +405,11 @@ export class BrokerTest {
   async jobSandboxPathExternalFn() {
     worker.setContext(`${__dirname}/fixture/ctx-fn`);
 
-    const job = await broker.createJob({ sandbox: true });
+    const job = await broker.createJob<number>({ sandbox: true });
 
-    await ewait(job, JobEvent.progress);
+    await swait(job.progress);
 
-    const [result] = await ewait(job, JobEvent.done);
+    const result = await swait(job.done);
 
     Expect(result).toBe(555);
   }
@@ -421,7 +420,7 @@ export class BrokerTest {
 
     const job = await broker.createJob({ sandbox: true });
 
-    const [result] = await ewait(job, JobEvent.fail);
+    const result = await swait(job.fail);
 
     Expect(/^Cannot find module/.test(result)).toBe(true);
   }
@@ -434,11 +433,11 @@ export class BrokerTest {
       return 23;
     });
 
-    const job = await broker.createJob({ sandbox: true });
+    const job = await broker.createJob<number>({ sandbox: true });
 
-    await ewait(job, JobEvent.progress);
+    await swait(job.progress);
 
-    const [result] = await ewait(job, JobEvent.done);
+    const result = await swait(job.done);
 
     Expect(result).toBe(23);
   }
@@ -453,9 +452,9 @@ export class BrokerTest {
 
     const job = await broker.createJob({ sandbox: true });
 
-    await ewait(job, JobEvent.progress);
+    await swait(job.progress);
 
-    const [result] = await ewait(job, JobEvent.fail);
+    const result = await swait(job.fail);
 
     Expect(result).toBe('an error');
   }
@@ -470,9 +469,9 @@ export class BrokerTest {
 
     const job = await broker.createJob({ sandbox: true });
 
-    await ewait(job, JobEvent.progress);
+    await swait(job.progress);
 
-    const [result] = await ewait(job, JobEvent.fail);
+    const result = await swait(job.fail);
 
     Expect(result).toBe('exited');
   }
@@ -488,11 +487,11 @@ export class BrokerTest {
 
     const job = await broker.createJob({ sandbox: true });
 
-    await ewait(job, JobEvent.progress);
+    await swait(job.progress);
 
     worker.abort();
 
-    const [result] = await ewait(job, JobEvent.fail);
+    const result = await swait(job.fail);
 
     Expect(result).toBe('aborted');
   }

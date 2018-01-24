@@ -1,8 +1,8 @@
 import {
   TestFixture, AsyncTeardown, AsyncTest, Expect
 } from 'alsatian';
-import { Worker, WorkerEvent, JobContext } from '../src/worker';
-import { ewait } from '../src/util';
+import { Worker, JobContext } from '../src/worker';
+import { swait } from '../src/util';
 import { workerCfg } from './fixture/cfg';
 
 let worker: Worker;
@@ -15,14 +15,14 @@ export class WorkerTest {
   async teardown() {
     worker.stop();
 
-    await ewait(worker, WorkerEvent.stop);
+    await swait(worker.down);
   }
 
   @AsyncTest()
   async startErr() {
     worker = new Worker(workerCfg, echoWork).start();
 
-    await ewait(worker, WorkerEvent.stop);
+    await swait(worker.down);
 
     Expect(worker.report.alive).toBe(false);
   }
@@ -31,11 +31,11 @@ export class WorkerTest {
   async stop() {
     worker = new Worker(workerCfg, echoWork).start();
 
-    await ewait(worker, WorkerEvent.stop);
+    await swait(worker.down);
 
     worker.stop();
 
-    await ewait(worker, WorkerEvent.stop);
+    await swait(worker.down);
 
     Expect(worker.report.alive).toBe(false);
   }
@@ -44,15 +44,15 @@ export class WorkerTest {
   async resumeErr() {
     worker = new Worker(workerCfg, echoWork).start();
 
-    await ewait(worker, WorkerEvent.stop);
+    await swait(worker.down);
 
     worker.start();
 
-    await ewait(worker, WorkerEvent.stop);
+    await swait(worker.down);
 
     worker.stop();
 
-    await ewait(worker, WorkerEvent.stop);
+    await swait(worker.down);
 
     Expect(worker.report.alive).toBe(false);
   }
@@ -61,11 +61,11 @@ export class WorkerTest {
   async forceClose() {
     worker = new Worker(workerCfg, echoWork).start();
 
-    await ewait(worker, WorkerEvent.stop);
+    await swait(worker.down);
 
     worker.stop(true);
 
-    await ewait(worker, WorkerEvent.stop);
+    await swait(worker.down);
 
     Expect(worker.report.alive).toBe(false);
   }

@@ -1,38 +1,22 @@
-import { EventEmitter } from 'events';
 import * as WS from 'ws';
 import * as M from './message';
 import { WorkerId } from './worker';
 import { Serializer } from './serializer';
 import { Job } from './job';
-import { NoopHandler } from './util';
 import { Logger } from './logger';
-
-export const enum RemoteEvent {
-  meta     = 'meta',
-  ping     = 'ping',
-  pong     = 'pong',
-  ready    = 'ready',
-  resume   = 'resume',
-  start    = 'start',
-  progress = 'progress',
-  finish   = 'finish'
-}
-
-// tslint:disable:unified-signatures
-export declare interface Remote {
-  on(e: RemoteEvent.meta|'meta', fn: NoopHandler): this;
-  on(e: RemoteEvent.ping|'ping', fn: NoopHandler): this;
-  on(e: RemoteEvent.pong|'pong', fn: NoopHandler): this;
-  on(e: RemoteEvent.ready|'ready', fn: NoopHandler): this;
-  on(e: RemoteEvent.resume|'resume', fn: NoopHandler): this;
-  on(e: RemoteEvent.start|'start', fn: NoopHandler): this;
-  on(e: RemoteEvent.progress|'progress', fn: NoopHandler): this;
-  on(e: RemoteEvent.finish|'finish', fn: NoopHandler): this;
-}
-// tslint:enable:unified-signatures
+import { Signal } from './signal';
 
 // broker's view of a remote worker and socket
-export class Remote extends EventEmitter {
+export class Remote {
+  readonly meta: Signal<M.Data> = new Signal();
+  readonly ping: Signal = new Signal();
+  readonly pong: Signal = new Signal();
+  readonly ready: Signal<M.Ready> = new Signal();
+  readonly resume: Signal<M.Resume> = new Signal();
+  readonly start: Signal<M.Start> = new Signal();
+  readonly progress: Signal<M.Progress> = new Signal();
+  readonly finish: Signal<M.Finish> = new Signal();
+
   readonly id: WorkerId;
   readonly name: string;
   private readonly ws: WS;
@@ -43,8 +27,6 @@ export class Remote extends EventEmitter {
   closing = false;   // worker intends to close
 
   constructor(id: WorkerId, name: string, ws: WS, log: Logger) {
-    super();
-
     this.id = id;
     this.name = name;
     this.ws = ws;
@@ -65,12 +47,6 @@ export class Remote extends EventEmitter {
           return resolve(true);
         }
       });
-    });
-  }
-
-  event(e: RemoteEvent, ...args: any[]) {
-    setImmediate(() => {
-      this.emit(e, ...args);
     });
   }
 }

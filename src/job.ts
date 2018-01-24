@@ -1,7 +1,6 @@
-import { EventEmitter } from 'events';
 import { WorkerId } from './worker';
-import { NoopHandler } from './util';
 import { Logger } from './logger';
+import { Signal } from './signal';
 
 export const enum _JobId {}
 export type JobId = _JobId & string; // pseudo nominal typing
@@ -24,37 +23,21 @@ export interface JobAttr<T = any> {
   data:     T;           // user-supplied data
 }
 
-export const enum JobEvent {
-  start    = 'start',
-  progress = 'progress',
-  done     = 'done',
-  fail     = 'fail',
-  expire   = 'expire',
-  stall    = 'stall',
-  retry    = 'retry'
-}
+export class Job<T = any> {
+  readonly start: Signal = new Signal();
+  readonly progress: Signal<number> = new Signal();
+  readonly done: Signal<T> = new Signal();
+  readonly fail: Signal = new Signal();
+  readonly expire: Signal = new Signal();
+  readonly stall: Signal = new Signal();
+  readonly retry: Signal = new Signal();
 
-// tslint:disable:unified-signatures
-export declare interface Job<T> {
-  on(e: JobEvent.start|'start', fn: NoopHandler): this;
-  on(e: JobEvent.progress|'progress', fn: NoopHandler): this;
-  on(e: JobEvent.done|'done', fn: NoopHandler): this;
-  on(e: JobEvent.fail|'fail', fn: NoopHandler): this;
-  on(e: JobEvent.expire|'expire', fn: NoopHandler): this;
-  on(e: JobEvent.stall|'stall', fn: NoopHandler): this;
-  on(e: JobEvent.retry|'retry', fn: NoopHandler): this;
-}
-// tslint:enable:unified-signatures
-
-export class Job<T = any> extends EventEmitter {
   readonly attr: JobAttr<T>;
   private expireTimer: NodeJS.Timer|null;
   private stallTimer: NodeJS.Timer|null;
   private readonly log: Logger;
 
   constructor(j: JobAttr<T>, log: Logger) {
-    super();
-
     this.attr = j;
     this.log = log;
   }
@@ -69,7 +52,7 @@ export class Job<T = any> extends EventEmitter {
         startAt.getTime() + this.attr.expirems - now;
 
       // may have negative timeout (already elapsed)
-      this.expireTimer = setTimeout(() => this.event(JobEvent.expire), ms);
+      this.expireTimer = setTimeout(() => this.expire.emit(), ms);
       this.expireTimer.unref();
 
       this.log.debug(`set expire timer (${ms}ms)`, this.attr.id);
@@ -86,7 +69,7 @@ export class Job<T = any> extends EventEmitter {
 
       const ms = this.attr.stallms;
 
-      this.stallTimer = setTimeout(() => this.event(JobEvent.stall), ms);
+      this.stallTimer = setTimeout(() => this.stall.emit(), ms);
       this.stallTimer.unref();
 
       this.log.debug(`set stall timer (${ms}ms)`, this.attr.id);
@@ -119,14 +102,8 @@ export class Job<T = any> extends EventEmitter {
 
   async toPromise() {
     return new Promise<any>((resolve, reject) => {
-      this.once('done', resolve);
-      this.once('fail', reject);
-    });
-  }
-
-  event(e: JobEvent, ...args: any[]) {
-    setImmediate(() => {
-      this.emit(e, ...args);
+      this.done.once(resolve);
+      this.fail.once(reject);
     });
   }
 }

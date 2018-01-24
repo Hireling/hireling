@@ -1,10 +1,10 @@
-import { EventEmitter } from 'events';
 import * as WS from 'ws';
 import * as M from './message';
 import { Serializer } from './serializer';
 import { Logger, LogLevel } from './logger';
-import { TopPartial, mergeOpt, NoopHandler } from './util';
-import { Remote, RemoteEvent } from './remote';
+import { TopPartial, mergeOpt } from './util';
+import { Remote } from './remote';
+import { Signal } from './signal';
 
 export const SERVER_DEFS = {
   host: '127.0.0.1',
@@ -14,33 +14,19 @@ export const SERVER_DEFS = {
 
 export type ServerOpt = typeof SERVER_DEFS;
 
-export const enum ServerEvent {
-  start            = 'start',
-  stop             = 'stop',
-  error            = 'error',
-  workerconnect    = 'workerconnect',
-  workerdisconnect = 'workerdisconnect'
-}
+export class Server {
+  readonly up: Signal = new Signal();
+  readonly down: Signal<Error|null> = new Signal();
+  readonly error: Signal<Error> = new Signal();
+  readonly workerup: Signal<Remote> = new Signal();
+  readonly workerdown: Signal<Remote> = new Signal();
 
-// tslint:disable:unified-signatures
-export declare interface Server {
-  on(e: ServerEvent.start|'start', fn: NoopHandler): this;
-  on(e: ServerEvent.stop|'stop', fn: NoopHandler): this;
-  on(e: ServerEvent.error|'error', fn: NoopHandler): this;
-  on(e: ServerEvent.workerconnect|'workerconnect', fn: NoopHandler): this;
-  on(e: ServerEvent.workerdisconnect|'workerdisconnect', fn: NoopHandler): this;
-}
-// tslint:enable:unified-signatures
-
-export class Server extends EventEmitter {
   private server: WS.Server;
   private readonly opt: ServerOpt;
   private readonly log = new Logger(Server.name);
   private readonly logRemote = new Logger(Remote.name); // shared instance
 
   constructor(opt?: TopPartial<ServerOpt>) {
-    super();
-
     this.opt = mergeOpt(SERVER_DEFS, opt) as ServerOpt;
     this.logLevel = this.opt.log;
   }
@@ -58,7 +44,7 @@ export class Server extends EventEmitter {
     this.server.close((err) => {
       this.log.warn('server stopped', err);
 
-      this.event(ServerEvent.stop, err);
+      this.down.emit(err || null);
     });
   }
 
@@ -73,7 +59,7 @@ export class Server extends EventEmitter {
 
       this.log.warn(`server up on ${host}:${port}`);
 
-      this.event(ServerEvent.start);
+      this.up.emit();
     });
 
     server.on('connection', (ws) => {
@@ -81,7 +67,7 @@ export class Server extends EventEmitter {
 
       let worker: Remote;
 
-      ws.on('message', async (raw) => {
+      ws.on('message', (raw) => {
         const msg = Serializer.unpack(raw as string) as M.Msg;
 
         if (!worker) {
@@ -92,9 +78,9 @@ export class Server extends EventEmitter {
               worker = new Remote(ready.id, ready.name, ws, this.logRemote);
 
               // allow broker to attach worker events
-              this.event(ServerEvent.workerconnect, worker);
+              this.workerup.emit(worker);
 
-              worker.event(RemoteEvent.ready, ready);
+              worker.ready.emit(ready);
             break;
 
             case M.Code.resume:
@@ -103,9 +89,9 @@ export class Server extends EventEmitter {
               worker = new Remote(resume.id, resume.name, ws, this.logRemote);
 
               // allow broker to attach worker events
-              this.event(ServerEvent.workerconnect, worker);
+              this.workerup.emit(worker);
 
-              worker.event(RemoteEvent.resume, resume);
+              worker.resume.emit(resume);
             break;
 
             default:
@@ -122,27 +108,27 @@ export class Server extends EventEmitter {
 
           switch (msg.code) {
             case M.Code.meta:
-              worker.event(RemoteEvent.meta, msg.data);
+              worker.meta.emit(msg.data);
             break;
 
             case M.Code.ping:
-              worker.event(RemoteEvent.ping, msg.data);
+              worker.ping.emit(msg.data);
             break;
 
             case M.Code.pong:
-              worker.event(RemoteEvent.pong, msg.data);
+              worker.pong.emit(msg.data);
             break;
 
             case M.Code.start:
-              worker.event(RemoteEvent.start, msg.data);
+              worker.start.emit(msg.data as M.Start);
             break;
 
             case M.Code.progress:
-              worker.event(RemoteEvent.progress, msg.data);
+              worker.progress.emit(msg.data as M.Progress);
             break;
 
             case M.Code.finish:
-              worker.event(RemoteEvent.finish, msg.data);
+              worker.finish.emit(msg.data as M.Finish);
             break;
 
             default:
@@ -156,7 +142,7 @@ export class Server extends EventEmitter {
         this.log.error('socket close', code, reason);
 
         if (worker) {
-          this.event(ServerEvent.workerdisconnect, worker);
+          this.workerdown.emit(worker);
         }
       });
 
@@ -168,15 +154,9 @@ export class Server extends EventEmitter {
     server.on('error', (err) => {
       this.log.error('server error', err);
 
-      this.event(ServerEvent.error, err);
+      this.error.emit(err);
     });
 
     return server;
-  }
-
-  private event(e: ServerEvent, ...args: any[]) {
-    setImmediate(() => {
-      this.emit(e, ...args);
-    });
   }
 }

@@ -1,8 +1,8 @@
 import {
   TestFixture, AsyncTeardown, AsyncTest, Expect
 } from 'alsatian';
-import { Broker, BrokerEvent } from '../src/broker';
-import { ewait } from '../src/util';
+import { Broker } from '../src/broker';
+import { swait } from '../src/util';
 import { brokerCfg } from './fixture/cfg';
 
 let broker: Broker;
@@ -13,7 +13,7 @@ export class BrokerTest {
   async teardown() {
     broker.stop();
 
-    await ewait(broker, BrokerEvent.stop);
+    await swait(broker.down);
   }
 
   @AsyncTest()
@@ -22,7 +22,7 @@ export class BrokerTest {
 
     broker.start();
 
-    await ewait(broker, BrokerEvent.start);
+    await swait(broker.up);
 
     Expect(broker.report.alive).toBe(true);
   }
@@ -33,11 +33,11 @@ export class BrokerTest {
 
     broker.start();
 
-    await ewait(broker, BrokerEvent.start);
+    await swait(broker.up);
 
     broker.stop();
 
-    await ewait(broker, BrokerEvent.stop);
+    await swait(broker.down);
 
     Expect(broker.report.alive).toBe(false);
   }
@@ -48,15 +48,15 @@ export class BrokerTest {
 
     broker.start();
 
-    await ewait(broker, BrokerEvent.start);
+    await swait(broker.up);
 
     broker.stop();
 
-    await ewait(broker, BrokerEvent.stop);
+    await swait(broker.down);
 
     broker.start();
 
-    await ewait(broker, BrokerEvent.start);
+    await swait(broker.up);
 
     Expect(broker.report.alive).toBe(true);
   }
@@ -67,11 +67,11 @@ export class BrokerTest {
 
     broker.start();
 
-    await ewait(broker, BrokerEvent.start);
+    await swait(broker.up);
 
     broker.stop(true);
 
-    await ewait(broker, BrokerEvent.stop);
+    await swait(broker.down);
 
     Expect(broker.report.alive).toBe(false);
   }
@@ -82,7 +82,7 @@ export class BrokerTest {
 
     broker.start();
 
-    await ewait(broker, BrokerEvent.start);
+    await swait(broker.up);
 
     Expect(() => broker.start()).not.toThrow();
   }
@@ -93,14 +93,14 @@ export class BrokerTest {
 
     broker.start();
 
-    await ewait(broker, BrokerEvent.start);
+    await swait(broker.up);
 
     // event not awaited to catch intermediate state
     broker.stop();
 
     Expect(() => broker.stop()).not.toThrow();
 
-    await ewait(broker, BrokerEvent.stop);
+    await swait(broker.down);
   }
 
   @AsyncTest()
