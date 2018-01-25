@@ -13,7 +13,7 @@ export class Signal<T = any> {
     const wrap: Cb<T> = (...args: any[]) => {
       this.off(fn);
 
-      fn.apply(undefined, args);
+      fn.apply(null, args);
     };
 
     this.subs.push({ fn, wrap });
@@ -39,7 +39,7 @@ export class Signal<T = any> {
 
   emit(arg?: T) {
     for (const s of this.subs) {
-      (s.wrap || s.fn).call(undefined, arg);
+      (s.wrap || s.fn).call(null, arg);
     }
 
     return this;
