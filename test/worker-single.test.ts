@@ -379,7 +379,7 @@ export class BrokerTest {
   async jobSandboxPathOk() {
     worker.setContext(`${__dirname}/fixture/ctx-ok`);
 
-    const job = await broker.createJob<number>({ sandbox: true });
+    const job = await broker.createJob({ sandbox: true });
 
     await swait(job.progress);
 
@@ -405,7 +405,7 @@ export class BrokerTest {
   async jobSandboxPathExternalFn() {
     worker.setContext(`${__dirname}/fixture/ctx-fn`);
 
-    const job = await broker.createJob<number>({ sandbox: true });
+    const job = await broker.createJob({ sandbox: true });
 
     await swait(job.progress);
 
@@ -433,7 +433,7 @@ export class BrokerTest {
       return 23;
     });
 
-    const job = await broker.createJob<number>({ sandbox: true });
+    const job = await broker.createJob({ sandbox: true });
 
     await swait(job.progress);
 
