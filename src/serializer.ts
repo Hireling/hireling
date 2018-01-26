@@ -76,7 +76,8 @@ export class Serializer {
       .replace(/""-Infinity""/g, '-Infinity')
       .replace(/""undefined""/g, 'undefined')
       .replace(/""NaN""/g, 'NaN')
-      .replace(/""([^"]+?)""/g, 'new Date("$1")');
+      .replace(/""([^"]+?)""/g, 'new Date("$1")')
+      .replace(/\n/g, '\\'); // newlines in template literals and ctx fns
 
     // TODO: write a proper parser to replace eval
     return eval(`(${objStr})`);
