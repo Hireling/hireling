@@ -5,7 +5,7 @@ export type TopPartial<T> = {
 };
 
 // merge options recursively, ignore undefined keys
-export function mergeOpt(tgt: object = {}, src: object = {}) {
+export const mergeOpt = (tgt: object = {}, src: object = {}) => {
   const def = { ...tgt };
 
   for (const [key, val] of Object.entries(src)) {
@@ -23,7 +23,7 @@ export function mergeOpt(tgt: object = {}, src: object = {}) {
   }
 
   return def;
-}
+};
 
 export const swait = <T>(e: Signal<T>) => new Promise<T>(e.once.bind(e));
 
@@ -37,7 +37,7 @@ export interface SpinlockOpt {
   pre?:   () => void;    // fn to execute before every spin
 }
 
-export async function spinlock(opt: SpinlockOpt) {
+export const spinlock = async (opt: SpinlockOpt) => {
   const { ms, errms, test, pre } = opt;
 
   const start = Date.now();
@@ -55,7 +55,7 @@ export async function spinlock(opt: SpinlockOpt) {
   }
 
   return 'spinlock done';
-}
+};
 
 export type AsyncCb = (...args: any[]) => Promise<void>;
 
