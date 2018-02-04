@@ -25,9 +25,9 @@ export const mergeOpt = (tgt: object = {}, src: object = {}) => {
   return def;
 };
 
-export const swait = <T>(e: Signal<T>) => new Promise<T>(e.once.bind(e));
+export const swait = async <T>(e: Signal<T>) => new Promise<T>(e.once.bind(e));
 
-export const fnwait = (ms: number, fn = () => undefined as any) =>
+export const fnwait = async (ms: number, fn = () => undefined as any) =>
   new Promise(resolve => setTimeout(() => resolve(fn()), ms));
 
 export interface SpinlockOpt {

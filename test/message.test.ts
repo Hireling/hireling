@@ -121,6 +121,6 @@ export class MessageTest {
 
     const result = await swait(job.done);
 
-    Expect((result.a as Date).toISOString()).toBe(dateToStr);
+    Expect(result.a.toISOString()).toBe(dateToStr);
   }
 }
