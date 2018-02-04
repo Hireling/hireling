@@ -33,8 +33,8 @@ export class Job<T = any> {
   readonly retry    = new Signal();
 
   readonly attr: JobAttr<T>;
-  private expireTimer: NodeJS.Timer|null;
-  private stallTimer: NodeJS.Timer|null;
+  private expireTimer: NodeJS.Timer|null = null;
+  private stallTimer: NodeJS.Timer|null = null;
   private readonly log: Logger;
 
   constructor(j: JobAttr<T>, log: Logger) {

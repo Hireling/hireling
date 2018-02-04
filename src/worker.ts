@@ -50,7 +50,7 @@ export class Worker {
 
   readonly id: WorkerId;
   readonly name: string;
-  private ws: WS|null;
+  private ws: WS|null = null;
   private ctx: JobContext|string;          // as fn or as module path
   private opening = false;
   private closing = false;

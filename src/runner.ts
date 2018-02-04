@@ -3,7 +3,7 @@ import { JobContext, JobHandle } from './worker';
 import { StringifiedArgs, CprocMsg } from './sandbox';
 
 export class Runner {
-  cproc: ChildProcess|null;
+  cproc: ChildProcess|null = null;
   aborted = false;
   private readonly ctx: JobContext|string;
   private readonly sandbox: boolean;

@@ -21,7 +21,7 @@ export class Server {
   readonly workerup   = new Signal<Remote>();
   readonly workerdown = new Signal<Remote>();
 
-  private server: WS.Server;
+  private server: WS.Server|null = null;
   private readonly opt: ServerOpt;
   private readonly log = new Logger(Server.name);
   private readonly logRemote = new Logger(Remote.name); // shared instance
@@ -37,14 +37,24 @@ export class Server {
   }
 
   start() {
+    if (this.server) {
+      throw new Error('server is running');
+    }
+
     this.server = this.startServer();
   }
 
   stop() {
+    if (!this.server) {
+      throw new Error('server not started');
+    }
+
     this.server.close((err) => {
       this.log.warn('server stopped', err);
 
       this.down.emit(err || null);
+
+      this.server = null;
     });
   }
 
