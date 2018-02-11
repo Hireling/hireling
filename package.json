@@ -19,7 +19,7 @@
     "ws": "~4.0.0"
   },
   "devDependencies": {
-    "@types/node": "~9.4.0",
+    "@types/node": "~9.4.5",
     "@types/uuid": "~3.4.3",
     "@types/ws": "~4.0.0",
     "alsatian": "~2.0.0",
