@@ -7,11 +7,11 @@ import { Ctx } from './ctx';
 export const errStr = (err: any, def = '') =>
   err ? (err.message as string || String(err)) : def;
 
-export class Runner<T, U> {
+export class Runner<I = any, O = any> {
   private cproc: ChildProcess|null = null;
   private aborted = false;
 
-  async run(jh: JobHandle<T>) {
+  async run(jh: JobHandle<I>) {
     const { job } = jh;
 
     if (!job.ctx || !job.ctxkind) {
@@ -41,8 +41,8 @@ export class Runner<T, U> {
     }
   }
 
-  private async runInSandbox(jh: JobHandle<T>) {
-    return new Promise<U>((resolve, reject) => {
+  private async runInSandbox(jh: JobHandle<I>) {
+    return new Promise<O>((resolve, reject) => {
       let resolved = false;
 
       const cproc = fork(`${__dirname}/sandbox`);
@@ -109,9 +109,9 @@ export class Runner<T, U> {
     });
   }
 
-  private async runInProcess(jh: JobHandle<T>) {
+  private async runInProcess(jh: JobHandle<I>) {
     try {
-      const ctxFn = Ctx.toFn<T, U>(jh.job.ctx, jh.job.ctxkind);
+      const ctxFn = Ctx.toFn<I, O>(jh.job.ctx, jh.job.ctxkind);
 
       // capture errors here
       const result = await ctxFn(jh);

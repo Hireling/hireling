@@ -10,14 +10,14 @@ import { Remote } from './remote';
 import { Signal } from './signal';
 import { CtxArg, Ctx } from './ctx';
 
-export interface JobCreate<T = any, U = any> {
+export interface JobCreate<I = any, O = any> {
   name?:     string;
   expirems?: number;
   stallms?:  number;
   retryx?:   number;
   sandbox?:  boolean;
-  data?:     T;
-  ctx?:      CtxArg<T, U>;
+  data?:     I;
+  ctx?:      CtxArg<I, O>;
 }
 
 interface Replay {
@@ -196,7 +196,7 @@ export class Broker {
     // this.jobs.clear();
   }
 
-  async createJob<T = any, U = any>(opt: JobCreate<T, U> = {}) {
+  async createJob<I = any, O = any>(opt: JobCreate<I, O> = {}) {
     if (this.closing) {
       throw new Error('broker is closing');
     }
@@ -204,7 +204,7 @@ export class Broker {
       throw new Error('broker is not ready');
     }
 
-    let job: Job<T, U>|null;
+    let job: Job<I, O>|null;
 
     if (this.serveropen) {
       const worker = this.workers
@@ -865,7 +865,7 @@ export class Broker {
     }
   }
 
-  private addJobHandle<T>(j: JobAttr<T>) {
+  private addJobHandle<I>(j: JobAttr<I>) {
     this.log.debug('create job handle', j.id);
 
     const job = new Job(j, this.logJob);

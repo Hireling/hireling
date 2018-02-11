@@ -12,8 +12,8 @@ export interface JobProgress {
   progress: any;
 }
 
-export interface JobDone<T = any> {
-  result: T;
+export interface JobDone<O = any> {
+  result: O;
 }
 
 export interface JobFailed {
@@ -21,7 +21,7 @@ export interface JobFailed {
   msg:    string;
 }
 
-export interface JobAttr<T = any> {
+export interface JobAttr<I = any> {
   id:       JobId;
   workerid: WorkerId|null;
   name:     string;
@@ -34,26 +34,26 @@ export interface JobAttr<T = any> {
   retryx:   number;       // number of times to rety upon failure
   retries:  number;       // current attempt count, also acts as seq number
   sandbox:  boolean|null; // run this job inside a sandbox
-  data:     T;            // user-supplied data
+  data:     I;            // user-supplied data
   ctx:      string|null;  // user-supplied execution context, stringified
   ctxkind:  CtxKind|null; // to restore ctx after stringify/parse
 }
 
-export class Job<T = any, U = any> {
+export class Job<I = any, O = any> {
   readonly start    = new Signal();
   readonly progress = new Signal<JobProgress>();
-  readonly done     = new Signal<JobDone<U>>();
+  readonly done     = new Signal<JobDone<O>>();
   readonly fail     = new Signal<JobFailed>();
   readonly expire   = new Signal();
   readonly stall    = new Signal();
   readonly retry    = new Signal();
 
-  readonly attr: JobAttr<T>;
+  readonly attr: JobAttr<I>;
   private expireTimer: NodeJS.Timer|null = null;
   private stallTimer: NodeJS.Timer|null = null;
   private readonly log: Logger;
 
-  constructor(j: JobAttr<T>, log: Logger) {
+  constructor(j: JobAttr<I>, log: Logger) {
     this.attr = j;
     this.log = log;
   }
@@ -117,7 +117,7 @@ export class Job<T = any, U = any> {
   }
 
   async toPromise() {
-    return new Promise<JobDone<U>>((resolve, reject) => {
+    return new Promise<JobDone<O>>((resolve, reject) => {
       this.done.once(resolve);
       this.fail.once(reject);
     });

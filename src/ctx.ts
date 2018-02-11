@@ -7,10 +7,10 @@ export const enum CtxKind {
   src  = 'src',
 }
 
-export type CtxFn<T = any, U = any> = (jh: JobHandle<T>) => Promise<U>;
+export type CtxFn<I = any, O = any> = (jh: JobHandle<I>) => Promise<O>;
 
-export interface SrcCtx<T, U> {
-  ctx:     CtxFn<T, U>|string;
+export interface SrcCtx<I, O> {
+  ctx:     CtxFn<I, O>|string;
   ctxkind: CtxKind.src;
 }
 
@@ -19,17 +19,17 @@ export interface PathCtx {
   ctxkind: CtxKind.path;
 }
 
-export type RunCtx<T, U> = SrcCtx<T, U>|PathCtx;
+export type RunCtx<I, O> = SrcCtx<I, O>|PathCtx;
 
-export type CtxArg<T = any, U = any> = RunCtx<T, U>|CtxFn<T, U>|string;
+export type CtxArg<I = any, O = any> = RunCtx<I, O>|CtxFn<I, O>|string;
 
 export class Ctx {
-  static fromArg<T, U>(arg: CtxArg<T, U>|null) {
+  static fromArg<I, O>(arg: CtxArg<I, O>|null) {
     if (!arg) {
       return null;
     }
     else if (typeof arg === 'string' || typeof arg === 'function') {
-      const ctx: RunCtx<T, U> = {
+      const ctx: RunCtx<I, O> = {
         ctx:     arg,
         ctxkind: (typeof arg === 'string' ? CtxKind.path : CtxKind.src) as any
       };
@@ -41,7 +41,7 @@ export class Ctx {
     }
   }
 
-  static fromSrc<T, U>(src: string, filename = '') {
+  static fromSrc<I, O>(src: string, filename = '') {
     const parent = module.parent;
 
     const m = new Module(filename, parent || undefined);
@@ -54,10 +54,10 @@ export class Ctx {
       parent.children.splice(parent.children.indexOf(m), 1);
     }
 
-    return m.exports.ctx as CtxFn<T, U>;
+    return m.exports.ctx as CtxFn<I, O>;
   }
 
-  static toFn<T, U>(ctx: string|null, ctxkind: CtxKind|null): CtxFn<T, U> {
+  static toFn<I, O>(ctx: string|null, ctxkind: CtxKind|null): CtxFn<I, O> {
     if (!ctx || !ctxkind) {
       throw new Error('no run context');
     }

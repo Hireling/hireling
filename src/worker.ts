@@ -8,8 +8,8 @@ import { spinlock, mergeOpt, SeqLock } from './util';
 import { Runner } from './runner';
 import { Signal } from './signal';
 
-export interface JobHandle<T = any> {
-  job:      JobAttr<T>;
+export interface JobHandle<I = any> {
+  job:      JobAttr<I>;
   progress: (progress: any) => void;
 }
 
@@ -54,7 +54,7 @@ export class Worker {
   private retries = 0;
   private exec: {
     data:     ExecData;
-    runner:   Runner<any, any>;
+    runner:   Runner;
     canAbort: boolean;
   }|null = null;
   private replay: M.Finish|null = null;    // sent on ready
@@ -330,7 +330,7 @@ export class Worker {
     }
   }
 
-  private async run<T, U>(j: JobAttr<T>) {
+  private async run<I, O>(j: JobAttr<I>) {
     this.log.info(`worker ${this.name} starting job ${j.name}`);
 
     const exec: ExecData = {
@@ -351,7 +351,7 @@ export class Worker {
 
     await this.sendMsg(M.Code.start, start);
 
-    let result: U|JobFailed;
+    let result: O|JobFailed;
     let status: 'done'|'failed';
 
     try {
