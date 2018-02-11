@@ -2,14 +2,13 @@ import {
   TestFixture, AsyncTeardownFixture, AsyncSetup, AsyncTeardown, AsyncTest, Expect, SpyOn, Timeout
 } from 'alsatian';
 import { Broker } from '../src/broker';
-import { Worker, JobContext } from '../src/worker';
+import { Worker } from '../src/worker';
 import { fnwait, swait } from '../src/util';
 import { brokerCfg, workerCfg } from './fixture/cfg';
+import { CtxFn } from '../src/ctx';
 
 let broker: Broker;
 let worker: Worker;
-
-const echoWork: JobContext = async jh => jh.job.data;
 
 @TestFixture()
 export class BrokerTest {
@@ -38,7 +37,7 @@ export class BrokerTest {
 
     await broker.clearJobs();
 
-    worker = new Worker(workerCfg, echoWork).start();
+    worker = new Worker(workerCfg).start();
 
     await swait(broker.drain);
   }
@@ -142,18 +141,24 @@ export class BrokerTest {
 
   @AsyncTest()
   async workerSimpleJob1() {
-    const job = await broker.createJob({ data: { a: 'b' } });
+    const job = await broker.createJob({
+      data: { a: 'b' },
+      ctx:  async jh => jh.job.data
+    });
 
-    const result = await swait(job.done);
+    const { result } = await swait(job.done);
 
     Expect(result).toEqual({ a: 'b' });
   }
 
   @AsyncTest()
   async workerSimpleJob2() {
-    const job = await broker.createJob({ data: { a: 'b' } });
+    const job = await broker.createJob({
+      data: { a: 'b' },
+      ctx:  async jh => jh.job.data
+    });
 
-    const result = await swait(job.done);
+    const { result } = await swait(job.done);
 
     Expect(result).not.toEqual({ a: 'c' });
   }
@@ -161,12 +166,12 @@ export class BrokerTest {
   @Timeout(1000)
   @AsyncTest()
   async stopWithBusyWorker() {
-    worker.setContext(async (job) => {
-      job.progress(50);
-      await fnwait(200);
+    await broker.createJob({
+      ctx: async (jh) => {
+        jh.progress(50);
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
     });
-
-    await broker.createJob();
 
     await swait(worker.jobprogress);
 
@@ -180,12 +185,12 @@ export class BrokerTest {
   @Timeout(1000)
   @AsyncTest()
   async forceStopWithBusyWorker() {
-    worker.setContext(async (job) => {
-      job.progress(50);
-      await fnwait(100);
+    await broker.createJob({
+      ctx: async (jh) => {
+        jh.progress(50);
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
     });
-
-    await broker.createJob();
 
     await swait(worker.jobprogress);
 
@@ -201,11 +206,6 @@ export class BrokerTest {
   @Timeout(1000)
   @AsyncTest()
   async stopTimeoutWithBusyWorker() {
-    worker.setContext(async (job) => {
-      job.progress(50);
-      await fnwait(600); // timeout spinlock
-    });
-
     broker.stop();
 
     await swait(broker.down);
@@ -216,7 +216,12 @@ export class BrokerTest {
 
     await swait(broker.drain);
 
-    await broker.createJob();
+    await broker.createJob({
+      ctx: async (jh) => {
+        jh.progress(50);
+        await new Promise(resolve => setTimeout(resolve, 600)); // cause timeout
+      }
+    });
 
     await swait(worker.jobprogress);
 
@@ -229,18 +234,18 @@ export class BrokerTest {
 
   @AsyncTest()
   async backToBackJobs() {
-    worker.setContext(async (job) => {
-      job.progress(10);
-    });
-
     const spy = { onProgress() {} };
     SpyOn(spy, 'onProgress');
 
-    const j1 = await broker.createJob();
+    const ctx: CtxFn = async (jh) => {
+      jh.progress(10);
+    };
+
+    const j1 = await broker.createJob({ ctx });
 
     j1.progress.on(spy.onProgress);
 
-    const j2 = await broker.createJob();
+    const j2 = await broker.createJob({ ctx });
 
     j2.progress.on(spy.onProgress);
 
@@ -258,16 +263,18 @@ export class BrokerTest {
 
     await swait(worker.down);
 
-    const job = await broker.createJob();
-
     const spy = { onProgress() {} };
     SpyOn(spy, 'onProgress');
 
+    const job = await broker.createJob({
+      ctx: async (jh) => {
+        jh.progress(10);
+      }
+    });
+
     job.progress.on(spy.onProgress);
 
-    worker = new Worker(workerCfg, async (jh) => {
-      jh.progress(10);
-    }).start();
+    worker = new Worker(workerCfg).start();
 
     await swait(job.done);
 
@@ -277,18 +284,16 @@ export class BrokerTest {
   @Timeout(1000)
   @AsyncTest()
   async jobProgress() {
-    worker.setContext(async (job) => {
-      job.progress(30);
-
-      await fnwait(100);
-
-      job.progress(100);
-    });
-
     const spy = { onProgress() {} };
     SpyOn(spy, 'onProgress');
 
-    const job = await broker.createJob();
+    const job = await broker.createJob({
+      ctx: async (jh) => {
+        jh.progress(30);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        jh.progress(100);
+      }
+    });
 
     job.progress.on(spy.onProgress);
 
@@ -299,36 +304,37 @@ export class BrokerTest {
 
   @AsyncTest()
   async jobError() {
-    worker.setContext(async (job) => {
-      job.progress(30);
-
-      throw new Error();
-    });
-
     const spy = { onFail() {} };
     SpyOn(spy, 'onFail');
 
-    const job = await broker.createJob();
+    const job = await broker.createJob({
+      ctx: async (jh) => {
+        jh.progress(30);
+
+        throw new Error('an error');
+      }
+    });
 
     job.fail.on(spy.onFail);
 
-    await swait(job.fail);
+    const result = await swait(job.fail);
 
+    Expect(result.msg).toBe('an error');
     Expect(spy.onFail).toHaveBeenCalled().exactly(1);
   }
 
   @Timeout(1000)
   @AsyncTest()
   async jobReplay() {
-    worker.setContext(async (job) => {
-      job.progress(33);
-      await fnwait(50);
-      job.progress(66);
-      await fnwait(50);
-      job.progress(100);
+    const job = await broker.createJob({
+      ctx: async (jh) => {
+        jh.progress(33);
+        await new Promise(resolve => setTimeout(resolve, 50));
+        jh.progress(66);
+        await new Promise(resolve => setTimeout(resolve, 50));
+        jh.progress(100);
+      }
     });
-
-    const job = await broker.createJob();
 
     await swait(job.progress);
 
@@ -352,15 +358,15 @@ export class BrokerTest {
   @Timeout(1000)
   @AsyncTest()
   async jobResume() {
-    worker.setContext(async (job) => {
-      job.progress(33);
-      await fnwait(100);
-      job.progress(66);
-      await fnwait(100);
-      job.progress(100);
+    const job = await broker.createJob({
+      ctx: async (jh) => {
+        jh.progress(33);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        jh.progress(66);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        jh.progress(100);
+      }
     });
-
-    const job = await broker.createJob();
 
     await swait(job.progress);
 

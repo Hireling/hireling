@@ -1,40 +1,32 @@
 import { fork, ChildProcess } from 'child_process';
-import { JobContext, JobHandle } from './worker';
-import { StringifiedArgs, CprocMsg } from './sandbox';
+import { JobHandle } from './worker';
+import { ProcMsg } from './sandbox';
+import { JobFailed } from './job';
+import { Ctx } from './ctx';
 
-export class Runner {
-  cproc: ChildProcess|null = null;
-  aborted = false;
-  private readonly ctx: JobContext|string;
-  private readonly sandbox: boolean;
+export const errStr = (err: any, def = '') =>
+  err ? (err.message as string || String(err)) : def;
 
-  constructor(ctx: JobContext|string, sandbox: boolean) {
-    this.ctx = ctx;
-    this.sandbox = sandbox;
-  }
+export class Runner<T, U> {
+  private cproc: ChildProcess|null = null;
+  private aborted = false;
 
-  async run(jh: JobHandle) {
-    if (this.sandbox) {
-      if (typeof this.ctx === 'string') {
-        // load path in sandbox
-        return this.runInSandbox(jh, this.ctx, true);
-      }
-      else {
-        // run stringified code in sandbox
-        return this.runInSandbox(jh, this.ctx.toString(), false);
-      }
+  async run(jh: JobHandle<T>) {
+    const { job } = jh;
+
+    if (!job.ctx || !job.ctxkind) {
+      const newErr: JobFailed = {
+        reason: 'error',
+        msg:    'no run context'
+      };
+
+      throw newErr;
+    }
+    else if (job.sandbox) {
+      return this.runInSandbox(jh);
     }
     else {
-      if (typeof this.ctx === 'string') {
-        // load path in current context
-        const ctx = require(this.ctx).ctx as JobContext;
-
-        return ctx(jh);
-      }
-      else {
-        // run code in current context
-        return this.ctx(jh);
-      }
+      return this.runInProcess(jh);
     }
   }
 
@@ -49,46 +41,54 @@ export class Runner {
     }
   }
 
-  private async runInSandbox(jh: JobHandle, ctx: string, isPath: boolean) {
-    return new Promise<any>((resolve, reject) => {
+  private async runInSandbox(jh: JobHandle<T>) {
+    return new Promise<U>((resolve, reject) => {
       let resolved = false;
 
       const cproc = fork(`${__dirname}/sandbox`);
 
       this.cproc = cproc;
 
-      cproc.on('message', (msg) => {
-        if (msg.code === CprocMsg.progress) {
-          jh.progress(msg.progress); // pipe to worker
-        }
-        else if (msg.code === CprocMsg.error) {
-          if (!resolved) {
-            resolved = true;
+      cproc.on('message', (msg: ProcMsg) => {
+        // tslint:disable-next-line:switch-default
+        switch (msg.code) {
+          case 'progress':
+            jh.progress(msg.progress); // pipe to worker
+          break;
 
-            return reject(msg.error);
-          }
-        }
-        else if (msg.code === CprocMsg.result) {
-          if (!resolved) {
-            resolved = true;
+          case 'done':
+            if (!resolved) {
+              resolved = true;
 
-            return resolve(msg.result);
-          }
-        }
-        else {
-          if (!resolved) {
-            resolved = true;
+              return resolve(msg.result);
+            }
+          break;
 
-            return reject(`unknown msg ${msg.code}`);
-          }
+          case 'failed':
+            if (!resolved) {
+              resolved = true;
+
+              const rejection: JobFailed = {
+                reason: 'error',
+                msg:    msg.msg
+              };
+
+              return reject(rejection);
+            }
+          break;
         }
       });
 
-      cproc.on('exit', () => {
+      cproc.on('exit', (code, signal) => {
         if (!resolved) {
           resolved = true;
 
-          return reject(this.aborted ? 'aborted' : 'exited');
+          const rejection: JobFailed = {
+            reason: this.aborted ? 'aborted' : 'exited',
+            msg:    errStr(code || signal, 'aborted/exited')
+          };
+
+          return reject(rejection);
         }
       });
 
@@ -96,13 +96,36 @@ export class Runner {
         if (!resolved) {
           resolved = true;
 
-          return reject(err ? (err.message || String(err)) : 'sandbox error');
+          const rejection: JobFailed = {
+            reason: 'error',
+            msg:    errStr(err, 'cproc error')
+          };
+
+          return reject(rejection);
         }
       });
 
-      const msg: StringifiedArgs = { jh, ctx, isPath };
-
-      cproc.send(msg);
+      cproc.send(jh.job);
     });
+  }
+
+  private async runInProcess(jh: JobHandle<T>) {
+    try {
+      const ctxFn = Ctx.toFn<T, U>(jh.job.ctx, jh.job.ctxkind);
+
+      // capture errors here
+      const result = await ctxFn(jh);
+
+      return result;
+    }
+    catch (err) {
+      // wrap as job error, hide stack
+      const newErr: JobFailed = {
+        reason: 'error',
+        msg:    errStr(err, 'runner error')
+      };
+
+      throw newErr;
+    }
   }
 }

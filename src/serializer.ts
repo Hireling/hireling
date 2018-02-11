@@ -9,13 +9,13 @@ export class Serializer {
   }
 
   private static tag(str: string) {
-    // forces invalid JSON string for safe replacement when unpacking
+    // force invalid JSON-like string, replaced when unpacking
     return `""${str}""`;
   }
 
-  private static esc(str: string) {
-    // replace with \\ for eval
-    return str.replace(/"/g, '\\"');
+  private static esc(str: string, addQuotes: boolean) {
+    // escape stringified template literals and ctx functions for eval
+    return (addQuotes || /[^a-zA-Z0-9]/.test(str)) ? JSON.stringify(str) : str;
   }
 
   private static _pack(obj: any): string {
@@ -24,13 +24,13 @@ export class Serializer {
     }
     else if (Object.prototype.toString.call(obj) === '[object Object]') {
       const fields = Object.keys(obj)
-        .map(k => `"${Serializer.esc(k)}":${Serializer._pack(obj[k])}`)
+        .map(k => `${Serializer.esc(k, false)}:${Serializer._pack(obj[k])}`)
         .join(',');
 
       return `{${fields}}`;
     }
     else if (typeof obj === 'string') {
-      return `"${Serializer.esc(obj)}"`;
+      return `${Serializer.esc(obj, true)}`;
     }
     else if (typeof obj === 'number') {
       if (obj === Number.POSITIVE_INFINITY) {
@@ -76,8 +76,7 @@ export class Serializer {
       .replace(/""-Infinity""/g, '-Infinity')
       .replace(/""undefined""/g, 'undefined')
       .replace(/""NaN""/g, 'NaN')
-      .replace(/""([^"]+?)""/g, 'new Date("$1")')
-      .replace(/\n/g, '\\'); // newlines in template literals and ctx fns
+      .replace(/""([^"]+?)""/g, 'new Date("$1")');
 
     // TODO: write a proper parser to replace eval
     return eval(`(${objStr})`);

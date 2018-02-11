@@ -2,7 +2,7 @@ import {
   TestFixture, AsyncTeardownFixture, AsyncSetup, AsyncTeardown, AsyncTest, Expect
 } from 'alsatian';
 import { Broker } from '../src/broker';
-import { Worker, JobContext } from '../src/worker';
+import { Worker } from '../src/worker';
 import { swait } from '../src/util';
 import { brokerCfg, workerCfg } from './fixture/cfg';
 
@@ -39,8 +39,6 @@ const nanData = {
   a: NaN
 };
 
-const echoWork: JobContext = async jh => jh.job.data;
-
 @TestFixture()
 export class MessageTest {
   @AsyncTeardownFixture
@@ -68,7 +66,7 @@ export class MessageTest {
 
     await broker.clearJobs();
 
-    worker = new Worker(workerCfg, echoWork).start();
+    worker = new Worker(workerCfg).start();
 
     await swait(broker.drain);
   }
@@ -86,27 +84,36 @@ export class MessageTest {
 
   @AsyncTest()
   async differentOutput() {
-    const job = await broker.createJob({ data: { a: 'b' } });
+    const job = await broker.createJob({
+      data: { a: 'b' },
+      ctx:  async jh => jh.job.data
+    });
 
-    const result = await swait(job.done);
+    const { result } = await swait(job.done);
 
     Expect(result).not.toEqual({ a: 'c' });
   }
 
   @AsyncTest()
   async complexWorkData() {
-    const job = await broker.createJob({ data: complexDataIn });
+    const job = await broker.createJob({
+      data: complexDataIn,
+      ctx:  async jh => jh.job.data
+    });
 
-    const result = await swait(job.done);
+    const { result } = await swait(job.done);
 
     Expect(result).toEqual(complexDataOut);
   }
 
   @AsyncTest()
   async nanPassthrough() {
-    const job = await broker.createJob({ data: nanData });
+    const job = await broker.createJob({
+      data: nanData,
+      ctx:  async jh => jh.job.data
+    });
 
-    const result = await swait(job.done);
+    const { result } = await swait(job.done);
 
     Expect(Number.isNaN(result.a)).toBe(true);
   }
@@ -116,10 +123,11 @@ export class MessageTest {
     const dateToStr = '2000-01-01T01:01:01.111Z';
 
     const job = await broker.createJob({
-      data: { a: new Date(dateToStr) }
+      data: { a: new Date(dateToStr) },
+      ctx:  async jh => jh.job.data
     });
 
-    const result = await swait(job.done);
+    const { result } = await swait(job.done);
 
     Expect(result.a.toISOString()).toBe(dateToStr);
   }

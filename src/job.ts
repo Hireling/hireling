@@ -1,33 +1,49 @@
 import { WorkerId } from './worker';
 import { Logger } from './logger';
 import { Signal } from './signal';
+import { CtxKind } from './ctx';
 
 export const enum _JobId {}
 export type JobId = _JobId & string; // pseudo nominal typing
 
 export type JobStatus = 'ready'|'processing'|'done'|'failed';
 
+export interface JobProgress {
+  progress: any;
+}
+
+export interface JobDone<T = any> {
+  result: T;
+}
+
+export interface JobFailed {
+  reason: 'error'|'aborted'|'exited';
+  msg:    string;
+}
+
 export interface JobAttr<T = any> {
   id:       JobId;
   workerid: WorkerId|null;
   name:     string;
-  created:  Date;        // absolute
-  expires:  Date|null;   // absolute
-  expirems: number|null; // relative, max life from time of creation
-  stalls:   Date|null;   // absolute
-  stallms:  number|null; // relative, max time between worker updates
+  created:  Date;         // absolute
+  expires:  Date|null;    // absolute
+  expirems: number|null;  // relative, max life from time of creation
+  stalls:   Date|null;    // absolute
+  stallms:  number|null;  // relative, max time between worker updates
   status:   JobStatus;
-  retryx:   number;      // number of times to rety upon failure
-  retries:  number;      // current attempt count, also acts as seq number
-  sandbox:  boolean;     // run this job inside a sandbox
-  data:     T;           // user-supplied data
+  retryx:   number;       // number of times to rety upon failure
+  retries:  number;       // current attempt count, also acts as seq number
+  sandbox:  boolean|null; // run this job inside a sandbox
+  data:     T;            // user-supplied data
+  ctx:      string|null;  // user-supplied execution context, stringified
+  ctxkind:  CtxKind|null; // to restore ctx after stringify/parse
 }
 
-export class Job<T = any> {
+export class Job<T = any, U = any> {
   readonly start    = new Signal();
-  readonly progress = new Signal<number>();
-  readonly done     = new Signal<T>();
-  readonly fail     = new Signal();
+  readonly progress = new Signal<JobProgress>();
+  readonly done     = new Signal<JobDone<U>>();
+  readonly fail     = new Signal<JobFailed>();
   readonly expire   = new Signal();
   readonly stall    = new Signal();
   readonly retry    = new Signal();
@@ -101,7 +117,7 @@ export class Job<T = any> {
   }
 
   async toPromise() {
-    return new Promise<any>((resolve, reject) => {
+    return new Promise<JobDone<U>>((resolve, reject) => {
       this.done.once(resolve);
       this.fail.once(reject);
     });

@@ -1,54 +1,29 @@
-import * as path from 'path';
-import Module = require('module');
-import { JobContext, JobHandle } from './worker';
+import { errStr } from './runner';
+import { JobAttr } from './job';
+import { Ctx } from './ctx';
 
-export interface StringifiedArgs {
-  jh:     JobHandle;
-  ctx:    string;
-  isPath: boolean;
-}
+export interface ProcProg { code: 'progress'; progress: any; }
+export interface ProcDone { code: 'done'; result: any; }
+export interface ProcFail { code: 'failed'; msg: string; }
+export type ProcMsg = ProcProg|ProcDone|ProcFail;
 
-export const enum CprocMsg {
-  progress = 'progress',
-  result   = 'result',
-  error    = 'error'
-}
+const msgRunner = (msg: ProcMsg) => process.send!(msg);
 
-process.on('message', async (opts: StringifiedArgs) => {
+process.on('message', async (j: JobAttr) => {
   try {
-    const { jh, ctx: _ctx, isPath } = opts;
+    const ctxFn = Ctx.toFn(j.ctx, j.ctxkind);
 
-    // re-wire progress hook
-    jh.progress = (progress) => {
-      process.send!({ code: CprocMsg.progress, progress });
-    };
-
-    let ctx: JobContext;
-
-    if (isPath) {
-      ctx = require(_ctx).ctx as JobContext;
-    }
-    else {
-      const filename = '';
-      const parent = module.parent;
-      const m = new Module(filename, parent || undefined);
-
-      m.filename = filename;
-      m.paths = (Module as any)._nodeModulePaths(path.dirname(filename));
-
-      (m as any)._compile(`exports.ctx = ${_ctx};`, filename);
-
-      if (parent) {
-        parent.children.splice(parent.children.indexOf(m), 1);
+    const result = await ctxFn({
+      job: j,
+      progress(progress) {
+        msgRunner({ code: 'progress', progress });
       }
+    });
 
-      ctx = m.exports.ctx;
-    }
-
-    process.send!({ code: CprocMsg.result, result: await ctx(jh) });
+    msgRunner({ code: 'done', result });
   }
   catch (err) {
-    process.send!({ code: CprocMsg.error, error: err.message });
+    msgRunner({ code: 'failed', msg:  errStr(err, 'sandbox error') });
   }
 });
 

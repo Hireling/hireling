@@ -2,6 +2,8 @@ import { JobAttr, JobStatus, JobId } from './job';
 import { WorkerId } from './worker';
 import { Logger, LogLevel } from './logger';
 import { Signal } from './signal';
+// @ts-ignore ignore unused for declaration emit
+import { CtxKind } from './ctx';
 
 export abstract class Db {
   readonly up   = new Signal();

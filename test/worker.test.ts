@@ -1,13 +1,11 @@
 import {
   TestFixture, AsyncTeardown, AsyncTest, Expect
 } from 'alsatian';
-import { Worker, JobContext } from '../src/worker';
+import { Worker } from '../src/worker';
 import { swait } from '../src/util';
 import { workerCfg } from './fixture/cfg';
 
 let worker: Worker;
-
-const echoWork: JobContext = async jh => jh.job.data;
 
 @TestFixture()
 export class WorkerTest {
@@ -20,7 +18,7 @@ export class WorkerTest {
 
   @AsyncTest()
   async startErr() {
-    worker = new Worker(workerCfg, echoWork).start();
+    worker = new Worker(workerCfg).start();
 
     await swait(worker.down);
 
@@ -29,7 +27,7 @@ export class WorkerTest {
 
   @AsyncTest()
   async stop() {
-    worker = new Worker(workerCfg, echoWork).start();
+    worker = new Worker(workerCfg).start();
 
     await swait(worker.down);
 
@@ -42,7 +40,7 @@ export class WorkerTest {
 
   @AsyncTest()
   async resumeErr() {
-    worker = new Worker(workerCfg, echoWork).start();
+    worker = new Worker(workerCfg).start();
 
     await swait(worker.down);
 
@@ -59,7 +57,7 @@ export class WorkerTest {
 
   @AsyncTest()
   async forceClose() {
-    worker = new Worker(workerCfg, echoWork).start();
+    worker = new Worker(workerCfg).start();
 
     await swait(worker.down);
 

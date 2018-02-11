@@ -3,14 +3,14 @@ import * as WS from 'ws';
 import * as M from './message';
 import { Serializer } from './serializer';
 import { Logger, LogLevel } from './logger';
-import { JobId, JobAttr } from './job';
+import { JobId, JobAttr, JobFailed } from './job';
 import { spinlock, mergeOpt, SeqLock } from './util';
 import { Runner } from './runner';
 import { Signal } from './signal';
 
 export interface JobHandle<T = any> {
   job:      JobAttr<T>;
-  progress: (progress: number) => void;
+  progress: (progress: any) => void;
 }
 
 export const enum _WorkerId {}
@@ -23,10 +23,6 @@ export interface ExecData {
 }
 
 export type ExecStrategy = 'exec'|'execquiet'; // TODO: cancel, abort
-
-export type JobContext = (job: JobHandle) => Promise<any>;
-
-const noopjob: JobContext = async () => {};
 
 export const WORKER_DEFS = {
   log:     LogLevel.warn,
@@ -45,13 +41,12 @@ export class Worker {
   readonly up          = new Signal();
   readonly down        = new Signal<Error|null>();
   readonly jobstart    = new Signal();
-  readonly jobprogress = new Signal<number>();
+  readonly jobprogress = new Signal<any>();
   readonly jobfinish   = new Signal<{ resumed: boolean }>();
 
   readonly id: WorkerId;
   readonly name: string;
   private ws: WS|null = null;
-  private ctx: JobContext|string;          // as fn or as module path
   private opening = false;
   private closing = false;
   private closingerr: Error|null = null;
@@ -59,19 +54,18 @@ export class Worker {
   private retries = 0;
   private exec: {
     data:     ExecData;
-    runner:   Runner;
+    runner:   Runner<any, any>;
     canAbort: boolean;
-   }|null = null;
+  }|null = null;
   private replay: M.Finish|null = null;    // sent on ready
   private strategy: ExecStrategy = 'exec'; // handling strategy for current job
   private readonly opt: WorkerOpt;
   private readonly log = new Logger(Worker.name);
 
-  constructor(opt?: Partial<WorkerOpt>, ctx: JobContext|string = noopjob) {
+  constructor(opt?: Partial<WorkerOpt>) {
     this.opt = mergeOpt(WORKER_DEFS, opt) as WorkerOpt;
     this.id = uuid.v4() as WorkerId;
     this.name = this.opt.name;
-    this.ctx  = ctx;
     this.logLevel = this.opt.log;
   }
 
@@ -85,12 +79,6 @@ export class Worker {
 
   set logLevel(val: LogLevel) {
     this.log.level = val;
-  }
-
-  setContext(ctx: JobContext|string) {
-    this.ctx = ctx;
-
-    return this;
   }
 
   start() {
@@ -342,33 +330,33 @@ export class Worker {
     }
   }
 
-  private async run(job: JobAttr) {
-    this.log.info(`worker ${this.name} starting job ${job.name}`);
-
-    let result: any;
-    let status: 'done'|'failed';
+  private async run<T, U>(j: JobAttr<T>) {
+    this.log.info(`worker ${this.name} starting job ${j.name}`);
 
     const exec: ExecData = {
-      jobid:   job.id,
+      jobid:   j.id,
       started: new Date(),
-      retries: job.retries
+      retries: j.retries
     };
 
+    this.exec = {
+      data:     exec,
+      runner:   new Runner(),
+      canAbort: !!j.sandbox
+    };
+
+    this.jobstart.event();
+
+    const start: M.Start = { job: exec };
+
+    await this.sendMsg(M.Code.start, start);
+
+    let result: U|JobFailed;
+    let status: 'done'|'failed';
+
     try {
-      this.exec = {
-        data:     exec,
-        runner:   new Runner(this.ctx, job.sandbox),
-        canAbort: job.sandbox
-      };
-
-      this.jobstart.event();
-
-      const start: M.Start = { job: exec };
-
-      await this.sendMsg(M.Code.start, start);
-
       result = await this.exec.runner.run({
-        job,
+        job: j,
         progress: async (progress) => {
           this.jobprogress.event(progress);
 
@@ -383,8 +371,7 @@ export class Worker {
       this.log.debug('job finished ok');
     }
     catch (err) {
-      // obscure error stack
-      result = err instanceof Error ? err.message : String(err);
+      result = err as JobFailed;
 
       status = 'failed';
 

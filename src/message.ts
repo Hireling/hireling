@@ -56,11 +56,11 @@ export interface Start extends Data {
 
 export interface Progress extends Data {
   readonly job:      ExecData;
-  readonly progress: number;
+  readonly progress: any; // job-generated
 }
 
 export interface Finish extends Data {
   readonly job:    ExecData;
   readonly status: JobStatus;
-  readonly result: any;
+  readonly result: any; // job-generated
 }

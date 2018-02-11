@@ -2,20 +2,22 @@ import * as uuid from 'uuid';
 import * as M from './message';
 import { WorkerId, ExecStrategy, ExecData } from './worker';
 import { Logger, LogLevel } from './logger';
-import { Job, JobStatus, JobAttr, JobId } from './job';
+import { Job, JobStatus, JobAttr, JobId, JobProgress, JobDone } from './job';
 import { spinlock, TopPartial, mergeOpt, SeqLock } from './util';
 import { Db, MemoryEngine } from './db';
 import { Server, SERVER_DEFS } from './server';
 import { Remote } from './remote';
 import { Signal } from './signal';
+import { CtxArg, Ctx } from './ctx';
 
-export interface JobCreate<T = any> {
+export interface JobCreate<T = any, U = any> {
   name?:     string;
   expirems?: number;
   stallms?:  number;
   retryx?:   number;
   sandbox?:  boolean;
   data?:     T;
+  ctx?:      CtxArg<T, U>;
 }
 
 interface Replay {
@@ -194,7 +196,7 @@ export class Broker {
     // this.jobs.clear();
   }
 
-  async createJob<T = any>(opt: JobCreate<T> = {}) {
+  async createJob<T = any, U = any>(opt: JobCreate<T, U> = {}) {
     if (this.closing) {
       throw new Error('broker is closing');
     }
@@ -202,7 +204,7 @@ export class Broker {
       throw new Error('broker is not ready');
     }
 
-    let job: Job<T>|null;
+    let job: Job<T, U>|null;
 
     if (this.serveropen) {
       const worker = this.workers
@@ -662,7 +664,11 @@ export class Broker {
           await this.updateJob(job, update);
         }
 
-        job.progress.event(msg.progress);
+        const progress: JobProgress = {
+          progress: msg.progress
+        };
+
+        job.progress.event(progress);
       });
     });
 
@@ -835,7 +841,11 @@ export class Broker {
       this.log.warn(`job ${job.attr.name} => ${update.status}${reason}`);
 
       if (update.status === 'done') {
-        job.done.event(msg.result);
+        const result: JobDone = {
+          result: msg.result
+        };
+
+        job.done.event(result);
       }
       else if (update.status === 'failed') {
         job.fail.event(msg.result);
@@ -855,7 +865,7 @@ export class Broker {
     }
   }
 
-  private addJobHandle(j: JobAttr) {
+  private addJobHandle<T>(j: JobAttr<T>) {
     this.log.debug('create job handle', j.id);
 
     const job = new Job(j, this.logJob);
@@ -879,6 +889,7 @@ export class Broker {
 
   private async addJob(opt: JobCreate, status: JobStatus, wId: WorkerId|null) {
     const id = uuid.v4() as JobId;
+    const cfg = Ctx.fromArg(opt.ctx || null);
 
     const job = this.addJobHandle({
       id,
@@ -892,8 +903,10 @@ export class Broker {
       status,
       retryx:   opt.retryx || 0,
       retries:  0,
-      sandbox:  opt.sandbox || false,
-      data:     opt.data || {}
+      sandbox:  opt.sandbox === undefined ? null : opt.sandbox,
+      data:     opt.data,
+      ctx:      cfg ? cfg.ctx.toString() : null,
+      ctxkind:  cfg ? cfg.ctxkind : null
     });
 
     try {

@@ -4,7 +4,7 @@ export type TopPartial<T> = {
   [P in keyof T]?: Partial<T[P]>;
 };
 
-// merge options recursively, ignore undefined keys
+// merge options recursively, ignore undefined values
 export const mergeOpt = (tgt: object = {}, src: object = {}) => {
   const def = { ...tgt };
 
