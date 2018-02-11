@@ -1,6 +1,6 @@
 {
   "name": "hireling",
-  "version": "2.0.2",
+  "version": "3.0.0",
   "description": "Modern, poll-free, multi-server task queue for Node.js",
   "author": "Alex Soncodi",
   "license": "MIT",
