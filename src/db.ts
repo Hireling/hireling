@@ -75,8 +75,9 @@ export class MemoryEngine extends Db {
     this.log.debug('search jobs');
 
     return this.jobs
-      // @ts-ignore ignore implicit any type
-      .filter(j => Object.entries(query).every(([k, v]) => job[k] === v))
+      .filter(j =>
+        Object.entries(query).every(([k, v]) => (j as any)[k] === v)
+      )
       .map(j => ({ ...j }));
   }
 
@@ -102,8 +103,7 @@ export class MemoryEngine extends Db {
     const job = this.jobs.find(j => j.id === id);
 
     if (job) {
-      // @ts-ignore ignore implicit any type
-      Object.entries(values).forEach(([k, v]) => job[k] = v);
+      Object.entries(values).forEach(([k, v]) => (job as any)[k] = v);
     }
   }
 
@@ -123,9 +123,9 @@ export class MemoryEngine extends Db {
   async remove(query: Partial<JobAttr>) {
     this.log.debug('remove jobs');
 
-    const matches = this.jobs
-      // @ts-ignore ignore implicit any type
-      .filter(j => Object.entries(query).every(([k, v]) => job[k] === v));
+    const matches = this.jobs.filter(j =>
+      Object.entries(query).every(([k, v]) => (j as any)[k] === v)
+    );
 
     for (const m of matches) {
       this.jobs.splice(this.jobs.indexOf(m), 1);
