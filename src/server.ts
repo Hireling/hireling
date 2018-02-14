@@ -50,11 +50,11 @@ export class Server {
     }
 
     this.server.close((err) => {
+      this.server = null;
+
       this.log.warn('server stopped', err);
 
       this.down.emit(err || null);
-
-      this.server = null;
     });
   }
 

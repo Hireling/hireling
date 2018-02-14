@@ -1,13 +1,13 @@
 import * as uuid from 'uuid';
 import * as M from './message';
-import { WorkerId, ExecStrategy, ExecData } from './worker';
 import { Logger, LogLevel } from './logger';
-import { Job, JobStatus, JobAttr, JobId } from './job';
 import { spinlock, TopPartial, mergeOpt, SeqLock } from './util';
-import { Db, MemoryEngine } from './db';
-import { Server, SERVER_DEFS } from './server';
-import { Remote } from './remote';
 import { Signal } from './signal';
+import { Server, SERVER_DEFS } from './server';
+import { JobId, JobAttr, Job, JobStatus } from './job';
+import { WorkerId, ExecStrategy, ExecData } from './worker';
+import { Db, MemoryEngine } from './db';
+import { Remote } from './remote';
 import { CtxArg, Ctx } from './ctx';
 
 export interface JobCreate<I = any, O = any> {
@@ -99,7 +99,7 @@ export class Broker {
 
   start() {
     if (this.opening) {
-      this.log.warn('broker is opening'); // BrokerEvent.start emitted later
+      this.log.warn('broker is opening'); // up emitted later
       return this;
     }
     else if (this.closing) {
@@ -131,7 +131,7 @@ export class Broker {
     }
 
     if (this.closing) {
-      this.log.warn('broker is closing'); // BrokerEvent.stop emitted later
+      this.log.warn('broker is closing'); // down emitted later
       return this;
     }
     else if (this.opening) {

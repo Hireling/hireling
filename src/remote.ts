@@ -1,10 +1,10 @@
 import * as WS from 'ws';
 import * as M from './message';
-import { WorkerId } from './worker';
 import { Serializer } from './serializer';
-import { Job } from './job';
 import { Logger } from './logger';
 import { Signal } from './signal';
+import { WorkerId } from './worker';
+import { Job } from './job';
 
 // broker's view of a remote worker and socket
 export class Remote {
