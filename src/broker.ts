@@ -410,10 +410,12 @@ export class Broker {
         const jobs = await this.db.get({ status: 'processing' });
 
         jobs.forEach(j => {
-          const job = this.addJobHandle(j);
+          if (!this.jobs.get(j.id)) {
+            const job = this.addJobHandle(j);
 
-          // use created date as fallback
-          job.syncTimers(job.attr.created);
+            // use created date as fallback
+            job.syncTimers(j.created);
+          }
         });
 
         this.log.warn(`loaded ${jobs.length} active jobs`);
@@ -888,36 +890,33 @@ export class Broker {
   }
 
   private async addJob(opt: JobCreate, status: JobStatus, wId: WorkerId|null) {
-    const id = uuid.v4() as JobId;
-    const cfg = Ctx.fromArg(opt.ctx || null);
-
-    const job = this.addJobHandle({
-      id,
-      workerid: wId,
-      name:     opt.name || `job-${id}`,
-      created:  new Date(),
-      expires:  null, // set on job start
-      expirems: opt.expirems || null,
-      stalls:   null, // set on job start
-      stallms:  opt.stallms || null,
-      status,
-      retryx:   opt.retryx || 0,
-      retries:  0,
-      sandbox:  opt.sandbox === undefined ? null : opt.sandbox,
-      data:     opt.data,
-      ctx:      cfg ? cfg.ctx.toString() : null,
-      ctxkind:  cfg ? cfg.ctxkind : null
-    });
-
     try {
-      await this.db.add(job.attr);
+      const id = uuid.v4() as JobId;
+      const cfg = Ctx.fromArg(opt.ctx || null);
+      const j: JobAttr = {
+        id,
+        workerid: wId,
+        name:     opt.name || `job-${id}`,
+        created:  new Date(),
+        expires:  null, // set on job start
+        expirems: opt.expirems || null,
+        stalls:   null, // set on job start
+        stallms:  opt.stallms || null,
+        status,
+        retryx:   opt.retryx || 0,
+        retries:  0,
+        sandbox:  opt.sandbox === undefined ? null : opt.sandbox,
+        data:     opt.data,
+        ctx:      cfg ? cfg.ctx.toString() : null,
+        ctxkind:  cfg ? cfg.ctxkind : null
+      };
 
-      return job;
+      await this.db.add(j);
+
+      return this.addJobHandle(j);
     }
     catch (err) {
       this.log.error('error saving job', err);
-
-      this.removeJobHandle(job); // sync mem
 
       return null;
     }
