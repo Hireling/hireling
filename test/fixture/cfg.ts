@@ -21,10 +21,10 @@ export const brokerCfg: TopPartial<BrokerOpt> = {
 };
 
 export const workerCfg: TopPartial<WorkerOpt> = {
+  log:     LogLevel.none,
   host:    TEST_HOST,
   port:    TEST_PORT,
   name:    'test-hireling',
-  log:     LogLevel.none,
   retryms: 50, // avoid timing out tests
   waitms:  250,
   retryx:  0

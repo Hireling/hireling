@@ -57,14 +57,15 @@ export const spinlock = async (opt: SpinlockOpt) => {
   return 'spinlock done';
 };
 
-export type AsyncCb = (...args: any[]) => Promise<void>;
+export type CbWrap = (...args: any[]) => Promise<void>;
+export type AsyncCb<T = any> = (arg: T) => Promise<void>;
 
 export class SeqLock {
   private lock = false;
-  private cbs: AsyncCb[] = [];
+  private cbs: CbWrap[] = [];
   private tick = false;
 
-  constructor(tick = false) {
+  constructor(tick: boolean) {
     this.tick = tick;
   }
 
@@ -72,6 +73,14 @@ export class SeqLock {
     this.cbs.push(fn);
 
     return this.turn();
+  }
+
+  cb<T>(fn: AsyncCb<T>) {
+    return (arg: T) => {
+      this.cbs.push(async () => fn(arg));
+
+      this.turn().catch(SeqLock.asyncErr);
+    };
   }
 
   private async turn(): Promise<void> {
@@ -91,11 +100,17 @@ export class SeqLock {
       await cb();
     }
     catch (err) {
-      console.log('async queue err', err);
+      SeqLock.asyncErr(err);
     }
 
     this.lock = false;
 
     return (this.tick) ? setImmediate(async () => this.turn()) : this.turn();
+  }
+
+  private static asyncErr(err: any) {
+    console.log('async queue err', err);
+
+    setImmediate(() => { throw err; });
   }
 }

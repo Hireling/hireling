@@ -8,17 +8,29 @@ export type JobId = _JobId & string; // pseudo nominal typing
 
 export type JobStatus = 'ready'|'processing'|'done'|'failed';
 
-export interface JobProgress {
+export interface EStart {
+}
+
+export interface EProgress {
   progress: any;
 }
 
-export interface JobDone<O = any> {
+export interface EDone<O = any> {
   result: O;
 }
 
-export interface JobFailed {
+export interface EFail {
   reason: 'error'|'aborted'|'exited';
   msg:    string;
+}
+
+export interface EExpire {
+}
+
+export interface EStall {
+}
+
+export interface ERetry {
 }
 
 export interface JobAttr<I = any> {
@@ -40,13 +52,13 @@ export interface JobAttr<I = any> {
 }
 
 export class Job<I = any, O = any> {
-  readonly start    = new Signal();
-  readonly progress = new Signal<JobProgress>();
-  readonly done     = new Signal<JobDone<O>>();
-  readonly fail     = new Signal<JobFailed>();
-  readonly expire   = new Signal();
-  readonly stall    = new Signal();
-  readonly retry    = new Signal();
+  readonly start    = new Signal<EStart>();
+  readonly progress = new Signal<EProgress>();
+  readonly done     = new Signal<EDone<O>>();
+  readonly fail     = new Signal<EFail>();
+  readonly expire   = new Signal<EExpire>();
+  readonly stall    = new Signal<EStall>();
+  readonly retry    = new Signal<ERetry>();
 
   readonly attr: JobAttr<I>;
   private expireTimer: NodeJS.Timer|null = null;
@@ -117,7 +129,7 @@ export class Job<I = any, O = any> {
   }
 
   async toPromise() {
-    return new Promise<JobDone<O>>((resolve, reject) => {
+    return new Promise<EDone<O>>((resolve, reject) => {
       this.done.once(resolve);
       this.fail.once(reject);
     });

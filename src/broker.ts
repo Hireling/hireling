@@ -2,7 +2,7 @@ import * as uuid from 'uuid';
 import * as M from './message';
 import { WorkerId, ExecStrategy, ExecData } from './worker';
 import { Logger, LogLevel } from './logger';
-import { Job, JobStatus, JobAttr, JobId, JobProgress, JobDone } from './job';
+import { Job, JobStatus, JobAttr, JobId } from './job';
 import { spinlock, TopPartial, mergeOpt, SeqLock } from './util';
 import { Db, MemoryEngine } from './db';
 import { Server, SERVER_DEFS } from './server';
@@ -20,9 +20,11 @@ export interface JobCreate<I = any, O = any> {
   ctx?:      CtxArg<I, O>;
 }
 
-interface Replay {
+interface FinishData {
   workerid: WorkerId;
-  data:     M.Finish;
+  ex:       ExecData;
+  status:   JobStatus;
+  result:   any;
 }
 
 const GC_DEFS = {
@@ -65,10 +67,10 @@ export class Broker {
   private serveropen = false;
   private dbopen = false;
   private gctimer: NodeJS.Timer|null = null;
-  private readonly replays: Replay[] = [];       // queue for db-failed replays
+  private readonly replays: FinishData[] = [];    // queue for db-failed replays
   private readonly server: Server;
   private readonly db: Db;
-  private readonly jobs = new Map<JobId, Job>(); // handles with client events
+  private readonly jobs = new Map<JobId, Job>();  // handles with client events
   private readonly workers: Remote[] = [];
   private readonly opt: BrokerOpt;
   private readonly log = new Logger(Broker.name);
@@ -184,7 +186,7 @@ export class Broker {
       this.workers.map(async (w) => ({
         id:   w.id,
         name: w.name,
-        ms:   await w.sendMsg(M.Code.ping) ? (Date.now() - start) : bad
+        ms:   await w.sendMsg({ code: M.Code.ping }) ? Date.now() - start : bad
       }))
     );
   }
@@ -392,10 +394,10 @@ export class Broker {
 
       for (const r of this.replays.slice()) {
         try {
-          const job = await this.resumeJob(r.workerid, r.data.job, 'replay');
+          const job = await this.resumeJob(r.workerid, r.ex, 'replay');
 
           if (job) {
-            await this.finishJob(r.workerid, job, r.data);
+            await this.finishJob(job, r);
           }
 
           this.replays.splice(this.replays.indexOf(r), 1);
@@ -547,156 +549,140 @@ export class Broker {
   private receiveWorker(worker: Remote) {
     const seq = new SeqLock(true); // process requests sequentially
 
-    worker.meta.on(async () => {
-      return seq.run(async () => {
-        this.log.debug(`meta from ${worker.name}`);
-      });
-    });
+    worker.meta.on(seq.cb(async () => {
+      this.log.debug(`meta from ${worker.name}`);
+    }));
 
-    worker.ping.on(async () => {
-      return seq.run(async () => {
-        this.log.debug(`ping from ${worker.name}`);
+    worker.ping.on(seq.cb(async () => {
+      this.log.debug(`ping from ${worker.name}`);
 
-        await worker.sendMsg(M.Code.pong);
-      });
-    });
+      await worker.sendMsg({ code: M.Code.pong });
+    }));
 
-    worker.pong.on(async () => {
-      return seq.run(async () => {
-        this.log.debug(`pong from ${worker.name}`);
-      });
-    });
+    worker.pong.on(seq.cb(async () => {
+      this.log.debug(`pong from ${worker.name}`);
+    }));
 
-    worker.ready.on(async (msg) => {
-      return seq.run(async () => {
-        const replay = msg.replay;
+    worker.ready.on(seq.cb(async (msg) => {
+      if (msg.replay) {
+        const { ex, result, status } = msg.replay;
+        const data: FinishData = { workerid: worker.id, ex, result, status };
 
-        if (replay) {
-          try {
-            const job = await this.resumeJob(worker.id, replay.job, 'ready');
+        try {
+          const job = await this.resumeJob(worker.id, ex, 'ready');
 
-            if (job) {
-              await this.finishJob(worker.id, job, replay);
-            }
-          }
-          catch (err) {
-            this.replays.push({ workerid: worker.id, data: replay });
+          if (job) {
+            await this.finishJob(job, data);
           }
         }
-
-        // crash recovery
-        worker.lockStart = false;
-        worker.job = null;
-
-        const strat: ExecStrategy = 'exec';
-        const readyOk: M.ReadyOk = { strategy: strat };
-
-        if (await worker.sendMsg(M.Code.readyok, readyOk)) {
-          this.log.info(`worker ${worker.name} ready (${strat})`);
-
-          this.workers.push(worker);
-
-          this.workerjoin.event();
-
-          if (!this.opt.manual) {
-            await this.reserveJob(worker);
-          }
+        catch (err) {
+          this.replays.push(data);
         }
-      });
-    });
+      }
 
-    worker.resume.on(async (msg) => {
-      return seq.run(async () => {
-        const job = await this.resumeJob(worker.id, msg.job, 'resume');
+      // crash recovery
+      worker.lockStart = false;
+      worker.job = null;
 
-        // lock worker if active job unrecoverable (in lieu of job assignment)
-        worker.lockStart = !job;
-        worker.job = job;
+      const strat: ExecStrategy = 'exec';
 
-        if (job) {
-          const update = job.syncTimers(msg.job.started);
+      if (await worker.sendMsg({ code: M.Code.readyok, strat })) {
+        this.log.info(`worker ${worker.name} ready (${strat})`);
 
-          if (update) {
-            await this.updateJob(job, update);
-          }
-        }
+        this.workers.push(worker);
 
-        const strat: ExecStrategy = job ? 'exec' : 'execquiet';
-        const readyOk: M.ReadyOk = { strategy: strat };
-
-        if (await worker.sendMsg(M.Code.readyok, readyOk)) {
-          this.log.info(`worker ${worker.name} resume (${strat})`);
-
-          this.workers.push(worker);
-
-          this.workerjoin.event();
-        }
-      });
-    });
-
-    worker.start.on(async (msg) => {
-      return seq.run(async () => {
-        const job = await this.resumeJob(worker.id, msg.job, 'start');
-
-        if (!job) {
-          return;
-        }
-
-        const update = job.syncTimers(msg.job.started);
-
-        if (update) {
-          await this.updateJob(job, update);
-        }
-
-        job.start.event();
-      });
-    });
-
-    worker.progress.on(async (msg) => {
-      return seq.run(async () => {
-        const job = await this.resumeJob(worker.id, msg.job, 'progress');
-
-        if (!job) {
-          return;
-        }
-
-        const update = job.syncTimers(msg.job.started);
-
-        if (update) {
-          await this.updateJob(job, update);
-        }
-
-        const progress: JobProgress = {
-          progress: msg.progress
-        };
-
-        job.progress.event(progress);
-      });
-    });
-
-    worker.finish.on(async (msg) => {
-      return seq.run(async () => {
-        const job = await this.resumeJob(worker.id, msg.job, 'finish');
-
-        if (worker.lockStart) {
-          this.log.warn('unlocking worker resume');
-          // always unlock worker, even when discarding job result
-          worker.lockStart = false;
-        }
-
-        if (!job) {
-          return;
-        }
-
-        await this.finishJob(worker.id, job, msg);
-
-        worker.job = null; // release worker even if update failed
+        this.workerjoin.event();
 
         if (!this.opt.manual) {
           await this.reserveJob(worker);
         }
+      }
+    }));
+
+    worker.resume.on(seq.cb(async (msg) => {
+      const job = await this.resumeJob(worker.id, msg.ex, 'resume');
+
+      // lock worker if active job unrecoverable (in lieu of job assignment)
+      worker.lockStart = !job;
+      worker.job = job;
+
+      if (job) {
+        const update = job.syncTimers(msg.ex.started);
+
+        if (update) {
+          await this.updateJob(job, update);
+        }
+      }
+
+      const strat: ExecStrategy = job ? 'exec' : 'execquiet';
+
+      if (await worker.sendMsg({ code: M.Code.readyok, strat })) {
+        this.log.info(`worker ${worker.name} resume (${strat})`);
+
+        this.workers.push(worker);
+
+        this.workerjoin.event();
+      }
+    }));
+
+    worker.start.on(seq.cb(async (msg) => {
+      const job = await this.resumeJob(worker.id, msg.ex, 'start');
+
+      if (!job) {
+        return;
+      }
+
+      const update = job.syncTimers(msg.ex.started);
+
+      if (update) {
+        await this.updateJob(job, update);
+      }
+
+      job.start.event();
+    }));
+
+    worker.progress.on(seq.cb(async (msg) => {
+      const job = await this.resumeJob(worker.id, msg.ex, 'progress');
+
+      if (!job) {
+        return;
+      }
+
+      const update = job.syncTimers(msg.ex.started);
+
+      if (update) {
+        await this.updateJob(job, update);
+      }
+
+      job.progress.event({ progress: msg.progress });
+    }));
+
+    worker.finish.on(seq.cb(async (msg) => {
+      const job = await this.resumeJob(worker.id, msg.ex, 'finish');
+
+      if (worker.lockStart) {
+        this.log.warn('unlocking worker resume');
+        // always unlock worker, even when discarding job result
+        worker.lockStart = false;
+      }
+
+      if (!job) {
+        return;
+      }
+
+      await this.finishJob(job, {
+        workerid: worker.id,
+        ex:       msg.ex,
+        result:   msg.result,
+        status:   msg.status
       });
-    });
+
+      worker.job = null; // release worker even if update failed
+
+      if (!this.opt.manual) {
+        await this.reserveJob(worker);
+      }
+    }));
   }
 
   private async resumeJob(wId: WorkerId, ex: ExecData, tag: string) {
@@ -794,11 +780,7 @@ export class Broker {
       return false;
     }
 
-    const add: M.Assign = {
-      job: job.attr
-    };
-
-    if (await worker.sendMsg(M.Code.assign, add)) {
+    if (await worker.sendMsg({ code: M.Code.assign, job: job.attr })) {
       worker.job = job;
 
       this.log.debug(`assigned job ${job.attr.name} => ${worker.name}`);
@@ -817,12 +799,11 @@ export class Broker {
     }
   }
 
-  private async finishJob(wId: WorkerId, job: Job, msg: M.Finish) {
-    const update: Partial<JobAttr> = {
-      status: msg.status
-    };
+  private async finishJob(job: Job, msg: FinishData) {
+    const { status, result } = msg;
+    const update: Partial<JobAttr> = { status };
 
-    if (msg.status === 'failed' && job.canRetry()) {
+    if (status === 'failed' && job.canRetry()) {
       update.status = 'ready'; // re-queue job to retry
       update.retries = job.attr.retries + 1;
     }
@@ -843,25 +824,21 @@ export class Broker {
       this.log.warn(`job ${job.attr.name} => ${update.status}${reason}`);
 
       if (update.status === 'done') {
-        const result: JobDone = {
-          result: msg.result
-        };
-
-        job.done.event(result);
+        job.done.event({ result });
       }
       else if (update.status === 'failed') {
-        job.fail.event(msg.result);
+        job.fail.event(result);
       }
       else if (update.status === 'ready') {
-        job.retry.event(msg.result);
+        job.retry.event(result);
       }
 
       return true;
     }
     else {
-      this.replays.push({ workerid: wId, data: msg });
+      this.replays.push(msg);
 
-      this.log.error('finish failed, queued for later', msg.job.jobid);
+      this.log.error('finish failed, queued for later', job.attr.id);
 
       return false;
     }

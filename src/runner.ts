@@ -1,7 +1,7 @@
 import { fork, ChildProcess } from 'child_process';
 import { JobHandle } from './worker';
 import { ProcMsg } from './sandbox';
-import { JobFailed } from './job';
+import { EFail } from './job';
 import { Ctx } from './ctx';
 
 export const errStr = (err: any, def = '') =>
@@ -15,7 +15,7 @@ export class Runner<I = any, O = any> {
     const { job } = jh;
 
     if (!job.ctx || !job.ctxkind) {
-      const newErr: JobFailed = {
+      const newErr: EFail = {
         reason: 'error',
         msg:    'no run context'
       };
@@ -54,7 +54,7 @@ export class Runner<I = any, O = any> {
         switch (msg.code) {
           case 'progress':
             jh.progress(msg.progress); // pipe to worker
-          break;
+            break;
 
           case 'done':
             if (!resolved) {
@@ -62,20 +62,20 @@ export class Runner<I = any, O = any> {
 
               return resolve(msg.result);
             }
-          break;
+            break;
 
           case 'failed':
             if (!resolved) {
               resolved = true;
 
-              const rejection: JobFailed = {
+              const rejection: EFail = {
                 reason: 'error',
                 msg:    msg.msg
               };
 
               return reject(rejection);
             }
-          break;
+            break;
         }
       });
 
@@ -83,7 +83,7 @@ export class Runner<I = any, O = any> {
         if (!resolved) {
           resolved = true;
 
-          const rejection: JobFailed = {
+          const rejection: EFail = {
             reason: this.aborted ? 'aborted' : 'exited',
             msg:    errStr(code || signal, 'aborted/exited')
           };
@@ -96,7 +96,7 @@ export class Runner<I = any, O = any> {
         if (!resolved) {
           resolved = true;
 
-          const rejection: JobFailed = {
+          const rejection: EFail = {
             reason: 'error',
             msg:    errStr(err, 'cproc error')
           };
@@ -120,7 +120,7 @@ export class Runner<I = any, O = any> {
     }
     catch (err) {
       // wrap as job error, hide stack
-      const newErr: JobFailed = {
+      const newErr: EFail = {
         reason: 'error',
         msg:    errStr(err, 'runner error')
       };

@@ -17,50 +17,70 @@ export const enum Code {
   resume,   // connected, job already in progress
   start,    // job starting
   progress, // job progress (from user)
-  finish,   // job finished (done, fail)
+  finish    // job finished (done, fail)
 }
 
-// envelope
-export interface Msg {
-  readonly code:     Code;
-  readonly data:     Data;
+export interface BaseMsg {
   readonly closing?: boolean;
 }
 
-// payload
-export interface Data {}
-
-export interface Assign extends Data {
-  readonly job: JobAttr;
+export interface Meta extends BaseMsg {
+  readonly code: Code.meta;
 }
 
-export interface ReadyOk extends Data {
-  readonly strategy: ExecStrategy; // follow-up instructions from broker
+export interface Ping extends BaseMsg {
+  readonly code: Code.ping;
 }
 
-export interface Ready extends Data {
+export interface Pong extends BaseMsg {
+  readonly code: Code.pong;
+}
+
+export interface ReadyOk extends BaseMsg {
+  readonly code:  Code.readyok;
+  readonly strat: ExecStrategy; // follow-up instructions from broker
+}
+
+export interface Assign extends BaseMsg {
+  readonly code: Code.assign;
+  readonly job:  JobAttr;
+}
+
+export interface Abort extends BaseMsg {
+  readonly code: Code.abort;
+}
+
+export interface Ready extends BaseMsg {
+  readonly code:   Code.ready;
   readonly id:     WorkerId;
   readonly name:   string;
   readonly replay: Finish|null; // replay job result obtained while d/c
 }
 
-export interface Resume extends Data {
+export interface Resume extends BaseMsg {
+  readonly code: Code.resume;
   readonly id:   WorkerId;
   readonly name: string;
-  readonly job:  ExecData; // resume active job, upgrades to replay
+  readonly ex:   ExecData; // resume active job, upgrades to replay
 }
 
-export interface Start extends Data {
-  readonly job: ExecData;
+export interface Start extends BaseMsg {
+  readonly code: Code.start;
+  readonly ex:   ExecData;
 }
 
-export interface Progress extends Data {
-  readonly job:      ExecData;
+export interface Progress extends BaseMsg {
+  readonly code:     Code.progress;
+  readonly ex:       ExecData;
   readonly progress: any; // job-generated
 }
 
-export interface Finish extends Data {
-  readonly job:    ExecData;
+export interface Finish extends BaseMsg {
+  readonly code:   Code.finish;
+  readonly ex:     ExecData;
   readonly status: JobStatus;
   readonly result: any; // job-generated
 }
+
+export type Msg =
+  Meta|Ping|Pong|ReadyOk|Assign|Abort|Ready|Resume|Start|Progress|Finish;

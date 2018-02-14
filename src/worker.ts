@@ -3,7 +3,7 @@ import * as WS from 'ws';
 import * as M from './message';
 import { Serializer } from './serializer';
 import { Logger, LogLevel } from './logger';
-import { JobId, JobAttr, JobFailed } from './job';
+import { JobId, JobAttr, EFail } from './job';
 import { spinlock, mergeOpt, SeqLock } from './util';
 import { Runner } from './runner';
 import { Signal } from './signal';
@@ -53,7 +53,7 @@ export class Worker {
   private retrytimer: NodeJS.Timer|null = null;
   private retries = 0;
   private exec: {
-    data:     ExecData;
+    ex:       ExecData;
     runner:   Runner;
     canAbort: boolean;
   }|null = null;
@@ -127,7 +127,7 @@ export class Worker {
     this.closing = true;
     this.closingerr = null;
 
-    this.sendMsg(M.Code.meta).catch(() => {});
+    this.sendMsg({ code: M.Code.meta }).catch(() => {});
 
     spinlock({
       ms:   this.opt.waitms,
@@ -173,7 +173,7 @@ export class Worker {
   async pingBroker() {
     const start = Date.now();
 
-    if (await this.sendMsg(M.Code.ping)) {
+    if (await this.sendMsg({ code: M.Code.ping })) {
       return Date.now() - start;
     }
     else {
@@ -195,22 +195,22 @@ export class Worker {
       this.retries = 0;
 
       if (this.exec) {
-        const resume: M.Resume = {
+        await this.sendMsg({
+          code: M.Code.resume,
           id:   this.id,
           name: this.name,
-          job:  this.exec.data
-        };
-
-        await this.sendMsg(M.Code.resume, resume);
+          ex:   this.exec.ex
+        });
       }
       else {
-        const ready: M.Ready = {
+        const sentOk = await this.sendMsg({
+          code:   M.Code.ready,
           id:     this.id,
           name:   this.name,
           replay: this.replay
-        };
+        });
 
-        if (await this.sendMsg(M.Code.ready, ready)) {
+        if (sentOk) {
           // only replay once
           this.replay = null;
         }
@@ -278,7 +278,7 @@ export class Worker {
         return seq.run(async () => {
           this.log.debug(`${this.name} got ping`);
 
-          await this.sendMsg(M.Code.pong);
+          await this.sendMsg({ code: M.Code.pong });
         });
 
       case M.Code.pong:
@@ -288,11 +288,9 @@ export class Worker {
 
       case M.Code.readyok:
         return seq.run(async () => {
-          const m = msg.data as M.ReadyOk;
+          this.strategy = msg.strat;
 
-          this.strategy = m.strategy;
-
-          this.log.debug(`${this.name} got readyok (strategy: ${m.strategy})`);
+          this.log.debug(`${this.name} got readyok (strategy: ${msg.strat})`);
 
           this.up.event();
         });
@@ -304,9 +302,7 @@ export class Worker {
             return;
           }
 
-          const assign = msg.data as M.Assign;
-
-          await this.run(assign.job);
+          await this.run(msg.job);
         });
 
       case M.Code.abort:
@@ -333,25 +329,23 @@ export class Worker {
   private async run<I, O>(j: JobAttr<I>) {
     this.log.info(`worker ${this.name} starting job ${j.name}`);
 
-    const exec: ExecData = {
+    const ex: ExecData = {
       jobid:   j.id,
       started: new Date(),
       retries: j.retries
     };
 
     this.exec = {
-      data:     exec,
+      ex,
       runner:   new Runner(),
       canAbort: !!j.sandbox
     };
 
     this.jobstart.event();
 
-    const start: M.Start = { job: exec };
+    await this.sendMsg({ code: M.Code.start, ex });
 
-    await this.sendMsg(M.Code.start, start);
-
-    let result: O|JobFailed;
+    let result: O|EFail;
     let status: 'done'|'failed';
 
     try {
@@ -360,9 +354,7 @@ export class Worker {
         progress: async (progress) => {
           this.jobprogress.event(progress);
 
-          const prog: M.Progress = { job: exec, progress };
-
-          await this.sendMsg(M.Code.progress, prog);
+          await this.sendMsg({ code: M.Code.progress, ex, progress });
         }
       });
 
@@ -371,7 +363,7 @@ export class Worker {
       this.log.debug('job finished ok');
     }
     catch (err) {
-      result = err as JobFailed;
+      result = err as EFail;
 
       status = 'failed';
 
@@ -385,49 +377,47 @@ export class Worker {
 
     this.jobfinish.event({ resumed }); // TODO: remove this prop
 
-    const finish: M.Finish = { job: exec, status, result };
-
-    await this.sendMsg(M.Code.finish, finish);
+    await this.sendMsg({ code: M.Code.finish, ex, status, result });
   }
 
-  private trySaveReplay(code: M.Code, data: M.Data) {
-    if (code === M.Code.finish) {
-      this.log.warn('save message for replay', code);
+  private trySaveReplay(msg: M.Msg) {
+    if (msg.code === M.Code.finish) {
+      this.log.warn('save message for replay', msg.code);
 
-      this.replay = data as M.Finish;
+      this.replay = msg;
     }
     else {
-      this.log.debug('drop message', code);
+      this.log.debug('drop message', msg.code);
     }
   }
 
-  private async sendMsg(code: M.Code, data: M.Data = {}) {
+  private async sendMsg(msg: M.Msg) {
     return new Promise<boolean>((resolve) => {
       const doSwap = (
         this.strategy === 'execquiet' &&
         (
-          code === M.Code.start ||
-          code === M.Code.progress
+          msg.code === M.Code.start ||
+          msg.code === M.Code.progress
         )
       );
 
-      const msg: M.Msg = doSwap ?
+      const msg2: M.Msg = doSwap ?
         // send meta/noop instead, will discard results
-        { code: M.Code.meta, data: {}, closing: this.closing } :
-        { code, data, closing: this.closing };
+        { code: M.Code.meta, closing: this.closing } :
+        { ...msg, closing: this.closing };
 
       if (!this.ws) {
-        this.trySaveReplay(code, data);
+        this.trySaveReplay(msg2);
 
         return resolve(false);
       }
 
-      this.ws.send(Serializer.pack(msg), (err) => {
+      this.ws.send(Serializer.pack(msg2), (err) => {
         if (err) {
           this.log.error('socket write err', err.message);
 
-          // save actual message being sent instead of original
-          this.trySaveReplay(msg.code, msg.data);
+          // save message being sent instead of original
+          this.trySaveReplay(msg2);
 
           return resolve(false);
         }

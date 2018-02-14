@@ -7,9 +7,9 @@ import { Remote } from './remote';
 import { Signal } from './signal';
 
 export const SERVER_DEFS = {
+  log:  LogLevel.warn,
   host: '127.0.0.1',
-  port: 3000,
-  log:  LogLevel.warn
+  port: 3000
 };
 
 export type ServerOpt = typeof SERVER_DEFS;
@@ -83,30 +83,26 @@ export class Server {
         if (!worker) {
           switch (msg.code) {
             case M.Code.ready:
-              const ready = msg.data as M.Ready;
-
-              worker = new Remote(ready.id, ready.name, ws, this.logRemote);
+              worker = new Remote(msg.id, msg.name, ws, this.logRemote);
 
               // allow broker to attach worker events
               this.workerup.emit(worker);
 
-              worker.ready.emit(ready);
-            break;
+              worker.ready.emit(msg);
+              break;
 
             case M.Code.resume:
-              const resume = msg.data as M.Resume;
-
-              worker = new Remote(resume.id, resume.name, ws, this.logRemote);
+              worker = new Remote(msg.id, msg.name, ws, this.logRemote);
 
               // allow broker to attach worker events
               this.workerup.emit(worker);
 
-              worker.resume.emit(resume);
-            break;
+              worker.resume.emit(msg);
+              break;
 
             default:
               this.log.error('unknown socket message', msg);
-            break;
+              break;
           }
         }
         else {
@@ -118,32 +114,32 @@ export class Server {
 
           switch (msg.code) {
             case M.Code.meta:
-              worker.meta.emit(msg.data);
-            break;
+              worker.meta.emit(msg);
+              break;
 
             case M.Code.ping:
-              worker.ping.emit(msg.data);
-            break;
+              worker.ping.emit(msg);
+              break;
 
             case M.Code.pong:
-              worker.pong.emit(msg.data);
-            break;
+              worker.pong.emit(msg);
+              break;
 
             case M.Code.start:
-              worker.start.emit(msg.data as M.Start);
-            break;
+              worker.start.emit(msg);
+              break;
 
             case M.Code.progress:
-              worker.progress.emit(msg.data as M.Progress);
-            break;
+              worker.progress.emit(msg);
+              break;
 
             case M.Code.finish:
-              worker.finish.emit(msg.data as M.Finish);
-            break;
+              worker.finish.emit(msg);
+              break;
 
             default:
               this.log.error('unknown worker message', msg);
-            break;
+              break;
           }
         }
       });

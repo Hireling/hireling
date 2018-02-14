@@ -8,9 +8,9 @@ import { Signal } from './signal';
 
 // broker's view of a remote worker and socket
 export class Remote {
-  readonly meta     = new Signal<M.Data>();
-  readonly ping     = new Signal();
-  readonly pong     = new Signal();
+  readonly meta     = new Signal<M.Meta>();
+  readonly ping     = new Signal<M.Ping>();
+  readonly pong     = new Signal<M.Pong>();
   readonly ready    = new Signal<M.Ready>();
   readonly resume   = new Signal<M.Resume>();
   readonly start    = new Signal<M.Start>();
@@ -33,9 +33,9 @@ export class Remote {
     this.log = log;
   }
 
-  async sendMsg(code: M.Code, data: M.Data = {}) {
+  async sendMsg(msg: M.Msg) {
     return new Promise<boolean>((resolve) => {
-      this.ws.send(Serializer.pack({ code, data }), (err) => {
+      this.ws.send(Serializer.pack(msg), (err) => {
         if (err) {
           this.log.error('socket write err', err.message);
 
