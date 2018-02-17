@@ -7,27 +7,30 @@ const TEST_HOST = '127.0.0.1';
 const TEST_PORT = 3005;
 
 export const brokerCfg: TopPartial<BrokerOpt> = {
-  log: LogLevel.none,
+  log:    LogLevel.none,
   waitms: 250,
-  gc:  null,
+  gc:     null,
   server: {
     log:  LogLevel.none,
     host: TEST_HOST,
     port: TEST_PORT
   },
   db: {
-    log: LogLevel.none
+    log:    LogLevel.none,
+    retryx: 0
   }
 };
 
 export const workerCfg: TopPartial<WorkerOpt> = {
   log:     LogLevel.none,
-  host:    TEST_HOST,
-  port:    TEST_PORT,
   name:    'test-hireling',
-  retryms: 50, // avoid timing out tests
-  waitms:  250,
-  retryx:  0
+  waitms:  50,
+  client: {
+    log:     LogLevel.none,
+    host:    TEST_HOST,
+    port:    TEST_PORT,
+    retryx:  0
+  }
 };
 
 process.on('unhandledRejection', (err) => {

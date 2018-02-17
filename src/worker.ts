@@ -1,12 +1,11 @@
 import * as uuid from 'uuid';
-import * as WS from 'ws';
 import * as M from './message';
-import { Serializer } from './serializer';
 import { Logger, LogLevel } from './logger';
-import { JobId, JobAttr, EFail } from './job';
-import { spinlock, mergeOpt, SeqLock } from './util';
-import { Runner } from './runner';
+import { spinlock, TopPartial, mergeOpt, SeqLock } from './util';
 import { Signal } from './signal';
+import { Client, CLIENT_DEFS } from './client';
+import { JobId, JobAttr, EFail } from './job';
+import { Runner } from './runner';
 
 export interface JobHandle<I = any> {
   job:      JobAttr<I>;
@@ -27,12 +26,9 @@ export type ExecStrategy = 'exec'|'execquiet'; // TODO: cancel, abort
 export const WORKER_DEFS = {
   log:     LogLevel.warn,
   name:    'worker',
-  host:    'localhost',
-  port:    3000,
-  wss:     false,
+  closems: 5000,
   waitms:  500,
-  retryms: 5000,
-  retryx:  0
+  client:  CLIENT_DEFS
 };
 
 export type WorkerOpt = typeof WORKER_DEFS;
@@ -46,12 +42,8 @@ export class Worker {
 
   readonly id: WorkerId;
   readonly name: string;
-  private ws: WS|null = null;
-  private opening = false;
+  private client: Client;
   private closing = false;
-  private closingerr: Error|null = null;
-  private retrytimer: NodeJS.Timer|null = null;
-  private retries = 0;
   private exec: {
     ex:       ExecData;
     runner:   Runner;
@@ -62,17 +54,17 @@ export class Worker {
   private readonly opt: WorkerOpt;
   private readonly log = new Logger(Worker.name);
 
-  constructor(opt?: Partial<WorkerOpt>) {
+  constructor(opt?: TopPartial<WorkerOpt>) {
     this.opt = mergeOpt(WORKER_DEFS, opt) as WorkerOpt;
     this.id = uuid.v4() as WorkerId;
     this.name = this.opt.name;
     this.logLevel = this.opt.log;
+    this.client = this.makeClient();
   }
 
   get report() {
     return {
-      alive:   !!this.ws,
-      closing: this.closing,
+      up:      this.client.report.up,
       working: !!this.exec
     };
   }
@@ -82,75 +74,45 @@ export class Worker {
   }
 
   start() {
-    if (this.opening) {
-      this.log.warn('broker is opening'); // WorkerEvent.start emitted later
-      return this;
-    }
-    else if (this.closing) {
-      this.closing = false;
-    }
-    else if (this.ws) {
-      this.log.warn('worker is already running');
-      this.up.event();
-      return this;
-    }
+    this.log.info('starting');
 
-    this.opening = true;
-
-    this.ws = this.startClient();
+    this.client.start();
 
     return this;
   }
 
   stop(force = false) {
-    if (this.retrytimer) {
-      this.log.info('cancel reconnect timer');
-      clearTimeout(this.retrytimer);
-      this.retrytimer = null;
-    }
-
     if (this.closing) {
-      this.log.warn('worker is closing'); // WorkerEvent.stop emitted later
-      return this;
-    }
-    else if (this.opening) {
-      this.opening = false;
-    }
-    else if (!this.ws) {
-      this.log.warn('worker is not running');
-      this.down.event(null);
+      this.log.warn('already closing');
       return this;
     }
 
     this.log.warn(`shutting down - ${force ? 'forced' : 'graceful'}`);
 
     this.closing = true;
-    this.closingerr = null;
 
-    this.sendMsg({ code: M.Code.meta }).catch(() => {});
+    this.msgClient({ code: M.Code.meta }).catch(() => {});
 
     spinlock({
-      ms:   this.opt.waitms,
-      test: () => force || !this.exec,
-      pre:  () => this.log.info('waiting on job to finish…')
-    })
-    .catch((err) => {
-      this.log.error('timeout elapsed, closing now', err);
-
-      this.closingerr = err;
+      ms:    this.opt.waitms,
+      errms: this.opt.closems,
+      // forced, stoped executing, or down while waiting
+      test:  () => force || !this.exec || !this.client.report.up,
+      pre:   () => this.log.info('waiting on job to finish…')
     })
     .then(() => {
-      if (this.ws) {
-        this.ws.terminate();
-        this.ws = null;
-      }
+      this.log.warn('stopping');
 
       this.closing = false;
 
-      this.down.event(this.closingerr);
+      this.client.stop();
     })
-    .catch(() => {
-      // for linter
+    .catch((err) => {
+      this.log.error('timeout elapsed, stopping now', err);
+
+      this.closing = false;
+
+      this.client.stop();
     });
 
     return this;
@@ -173,7 +135,7 @@ export class Worker {
   async pingBroker() {
     const start = Date.now();
 
-    if (await this.sendMsg({ code: M.Code.ping })) {
+    if (await this.msgClient({ code: M.Code.ping })) {
       return Date.now() - start;
     }
     else {
@@ -181,21 +143,16 @@ export class Worker {
     }
   }
 
-  private startClient() {
-    this.log.debug('client starting');
+  private makeClient() {
+    const seq = new SeqLock(false); // process requests sequentially
 
-    const ws = new WS(
-      `${this.opt.wss ? 'wss' : 'ws'}://${this.opt.host}:${this.opt.port}`
-    );
+    const client = new Client(this.opt.client);
 
-    ws.on('open', async () => {
-      this.log.debug(`socket open ${this.name}`);
-
-      this.opening = false;
-      this.retries = 0;
+    client.up.on(seq.cb(async () => {
+      this.log.debug('client connected');
 
       if (this.exec) {
-        await this.sendMsg({
+        await this.msgClient({
           code: M.Code.resume,
           id:   this.id,
           name: this.name,
@@ -203,131 +160,71 @@ export class Worker {
         });
       }
       else {
-        const sentOk = await this.sendMsg({
+        await this.msgClient({
           code:   M.Code.ready,
           id:     this.id,
           name:   this.name,
           replay: this.replay
         });
-
-        if (sentOk) {
-          // only replay once
-          this.replay = null;
-        }
       }
-    });
+    }));
 
-    ws.on('message', async (raw) => {
-      return this.handleMsg(Serializer.unpack(raw as string) as M.Msg);
-    });
+    client.down.on(seq.cb(async (err) => {
+      this.log.debug('client disconnected');
 
-    ws.on('close', (code, reason) => {
-      this.log.error(`socket close ${code} ${reason}`);
+      this.down.event(err);
+    }));
 
-      if (this.ws) {
-        this.ws.terminate();
-        this.ws = null;
+    client.meta.on(seq.cb(async () => {
+      this.log.debug(`${this.name} got meta`);
+    }));
+
+    client.ping.on(seq.cb(async () => {
+      this.log.debug(`${this.name} got ping`);
+
+      await this.msgClient({ code: M.Code.pong });
+    }));
+
+    client.pong.on(seq.cb(async () => {
+      this.log.debug(`${this.name} got pong`);
+    }));
+
+    client.readyok.on(seq.cb(async (msg) => {
+      this.strategy = msg.strat;
+      this.replay = null; // broker received replay
+
+      this.log.debug(`${this.name} got readyok (strategy: ${msg.strat})`);
+
+      this.up.event();
+    }));
+
+    client.assign.on(seq.cb(async (msg) => {
+      if (this.exec) {
+        this.log.error('job already assigned', msg);
+        return;
       }
 
-      this.down.event(null);
+      await this.run(msg.job);
+    }));
 
-      if (!this.closing) {
-        this.log.info('reconnecting');
-
-        this.retrytimer = setTimeout(() => {
-          const retriesLeft = (
-            !this.opt.retryx || (this.opt.retryx > this.retries)
-          );
-
-          if (retriesLeft) {
-            this.log.info(`connecting (attempt ${++this.retries})`);
-
-            this.ws = this.startClient();
-          }
-          else {
-            this.log.info('skip reconnecting');
-
-            this.opening = false;
-
-            if (!retriesLeft) {
-              this.log.warn('no retries left, stopping');
-              this.stop();
-            }
-          }
-        }, this.opt.retryms);
+    client.abort.on(seq.cb(async (msg) => {
+      if (!this.exec) {
+        this.log.error('no job to abort', msg);
+        return;
       }
-    });
+      else if (!this.exec.canAbort) {
+        this.log.error('job cannot be aborted', msg);
+        return;
+      }
 
-    ws.on('error', (err) => {
-      this.log.error('socket error', err);
-    });
+      this.abort();
+    }));
 
-    return ws;
-  }
-
-  private async handleMsg(msg: M.Msg) {
-    const seq = new SeqLock(false); // process requests sequentially
-
-    switch (msg.code) {
-      case M.Code.meta:
-        return seq.run(async () => {
-          this.log.debug(`${this.name} got meta`);
-        });
-
-      case M.Code.ping:
-        return seq.run(async () => {
-          this.log.debug(`${this.name} got ping`);
-
-          await this.sendMsg({ code: M.Code.pong });
-        });
-
-      case M.Code.pong:
-        return seq.run(async () => {
-          this.log.debug(`${this.name} got pong`);
-        });
-
-      case M.Code.readyok:
-        return seq.run(async () => {
-          this.strategy = msg.strat;
-
-          this.log.debug(`${this.name} got readyok (strategy: ${msg.strat})`);
-
-          this.up.event();
-        });
-
-      case M.Code.assign:
-        return seq.run(async () => {
-          if (this.exec) {
-            this.log.error('worker already has a job', msg);
-            return;
-          }
-
-          await this.run(msg.job);
-        });
-
-      case M.Code.abort:
-        return seq.run(async () => {
-          if (!this.exec) {
-            this.log.error('worker does not have a job', msg);
-            return;
-          }
-          else if (!this.exec.canAbort) {
-            this.log.error('worker cannot abort job', msg);
-            return;
-          }
-
-          this.abort();
-        });
-
-      default:
-        return seq.run(async () => {
-          this.log.error('unknown broker message', msg);
-        });
-    }
+    return client;
   }
 
   private async run<I, O>(j: JobAttr<I>) {
-    this.log.info(`worker ${this.name} starting job ${j.name}`);
+    this.log.info(`${this.name} starting job ${j.name}`);
 
     const ex: ExecData = {
       jobid:   j.id,
@@ -343,7 +240,7 @@ export class Worker {
 
     this.jobstart.event();
 
-    await this.sendMsg({ code: M.Code.start, ex });
+    await this.msgClient({ code: M.Code.start, ex });
 
     let result: O|EFail;
     let status: 'done'|'failed';
@@ -354,7 +251,7 @@ export class Worker {
         progress: async (progress) => {
           this.jobprogress.event(progress);
 
-          await this.sendMsg({ code: M.Code.progress, ex, progress });
+          await this.msgClient({ code: M.Code.progress, ex, progress });
         }
       });
 
@@ -377,54 +274,37 @@ export class Worker {
 
     this.jobfinish.event({ resumed }); // TODO: remove this prop
 
-    await this.sendMsg({ code: M.Code.finish, ex, status, result });
+    await this.msgClient({ code: M.Code.finish, ex, status, result });
   }
 
-  private trySaveReplay(msg: M.Msg) {
-    if (msg.code === M.Code.finish) {
-      this.log.warn('save message for replay', msg.code);
+  private async msgClient(msg: M.Msg) {
+    const doSwap = (
+      this.strategy === 'execquiet' &&
+      (
+        msg.code === M.Code.start ||
+        msg.code === M.Code.progress
+      )
+    );
 
-      this.replay = msg;
+    // send meta/noop, results will be discarded
+    const swapMsg: M.Msg = doSwap ?
+      { closing: this.closing, code: M.Code.meta } :
+      { closing: this.closing, ...msg };
+
+    if (await this.client.sendMsg(swapMsg)) {
+      return true;
     }
     else {
-      this.log.debug('drop message', msg.code);
-    }
-  }
+      if (swapMsg.code === M.Code.finish) {
+        this.log.warn('save message for replay', swapMsg.code);
 
-  private async sendMsg(msg: M.Msg) {
-    return new Promise<boolean>((resolve) => {
-      const doSwap = (
-        this.strategy === 'execquiet' &&
-        (
-          msg.code === M.Code.start ||
-          msg.code === M.Code.progress
-        )
-      );
-
-      const msg2: M.Msg = doSwap ?
-        // send meta/noop instead, will discard results
-        { code: M.Code.meta, closing: this.closing } :
-        { ...msg, closing: this.closing };
-
-      if (!this.ws) {
-        this.trySaveReplay(msg2);
-
-        return resolve(false);
+        this.replay = swapMsg;
+      }
+      else {
+        this.log.debug('drop message', swapMsg.code);
       }
 
-      this.ws.send(Serializer.pack(msg2), (err) => {
-        if (err) {
-          this.log.error('socket write err', err.message);
-
-          // save message being sent instead of original
-          this.trySaveReplay(msg2);
-
-          return resolve(false);
-        }
-        else {
-          return resolve(true);
-        }
-      });
-    });
+      return false;
+    }
   }
 }

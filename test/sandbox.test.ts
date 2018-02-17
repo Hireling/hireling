@@ -13,9 +13,7 @@ let worker: Worker;
 export class BrokerTest {
   @AsyncTeardownFixture
   async teardownFixture() {
-    broker = new Broker(brokerCfg);
-
-    broker.start();
+    broker = new Broker(brokerCfg).start();
 
     await swait(broker.up);
 
@@ -28,9 +26,7 @@ export class BrokerTest {
 
   @AsyncSetup
   async setup() {
-    broker = new Broker(brokerCfg);
-
-    broker.start();
+    broker = new Broker(brokerCfg).start();
 
     await swait(broker.up);
 
@@ -43,9 +39,11 @@ export class BrokerTest {
 
   @AsyncTeardown
   async teardown() {
-    worker.stop();
+    if (worker.report.up) {
+      worker.stop(true);
 
-    await swait(worker.down);
+      await swait(worker.down);
+    }
 
     broker.stop();
 

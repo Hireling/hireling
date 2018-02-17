@@ -18,9 +18,7 @@ export class BrokerTest {
 
   @AsyncTest()
   async start() {
-    broker = new Broker(brokerCfg);
-
-    broker.start();
+    broker = new Broker(brokerCfg).start();
 
     await swait(broker.up);
 
@@ -29,9 +27,7 @@ export class BrokerTest {
 
   @AsyncTest()
   async close() {
-    broker = new Broker(brokerCfg);
-
-    broker.start();
+    broker = new Broker(brokerCfg).start();
 
     await swait(broker.up);
 
@@ -44,9 +40,7 @@ export class BrokerTest {
 
   @AsyncTest()
   async restart() {
-    broker = new Broker(brokerCfg);
-
-    broker.start();
+    broker = new Broker(brokerCfg).start();
 
     await swait(broker.up);
 
@@ -63,9 +57,7 @@ export class BrokerTest {
 
   @AsyncTest()
   async forceClose() {
-    broker = new Broker(brokerCfg);
-
-    broker.start();
+    broker = new Broker(brokerCfg).start();
 
     await swait(broker.up);
 
@@ -78,9 +70,7 @@ export class BrokerTest {
 
   @AsyncTest()
   async startWhileRunning() {
-    broker = new Broker(brokerCfg);
-
-    broker.start();
+    broker = new Broker(brokerCfg).start();
 
     await swait(broker.up);
 
@@ -89,9 +79,7 @@ export class BrokerTest {
 
   @AsyncTest()
   async stopWhileStopping() {
-    broker = new Broker(brokerCfg);
-
-    broker.start();
+    broker = new Broker(brokerCfg).start();
 
     await swait(broker.up);
 

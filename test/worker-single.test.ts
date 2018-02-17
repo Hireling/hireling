@@ -14,9 +14,7 @@ let worker: Worker;
 export class BrokerTest {
   @AsyncTeardownFixture
   async teardownFixture() {
-    broker = new Broker(brokerCfg);
-
-    broker.start();
+    broker = new Broker(brokerCfg).start();
 
     await swait(broker.up);
 
@@ -29,9 +27,7 @@ export class BrokerTest {
 
   @AsyncSetup
   async setup() {
-    broker = new Broker(brokerCfg);
-
-    broker.start();
+    broker = new Broker(brokerCfg).start();
 
     await swait(broker.up);
 
@@ -44,9 +40,11 @@ export class BrokerTest {
 
   @AsyncTeardown
   async teardown() {
-    worker.stop();
+    if (worker.report.up) {
+      worker.stop(true);
 
-    await swait(worker.down);
+      await swait(worker.down);
+    }
 
     broker.stop();
 
@@ -78,8 +76,6 @@ export class BrokerTest {
     worker.stop();
 
     Expect(() => worker.stop()).not.toThrow();
-
-    await swait(worker.down);
   }
 
   @AsyncTest()
@@ -133,6 +129,7 @@ export class BrokerTest {
     await swait(broker.down);
 
     broker.start();
+    worker.start();
 
     await swait(broker.drain);
 
@@ -199,8 +196,6 @@ export class BrokerTest {
     await swait(broker.down);
 
     Expect(worker.report.working).toBe(true);
-
-    await swait(worker.jobfinish);
   }
 
   @Timeout(1000)
@@ -210,9 +205,9 @@ export class BrokerTest {
 
     await swait(broker.down);
 
-    broker = new Broker({ ...brokerCfg, closems: 1 });
+    broker = new Broker({ ...brokerCfg, closems: 1 }).start();
 
-    broker.start();
+    worker.start();
 
     await swait(broker.drain);
 
@@ -349,6 +344,7 @@ export class BrokerTest {
     job.done.on(spy.onDone);
 
     broker.start();
+    worker.start();
 
     await swait(worker.up);
 

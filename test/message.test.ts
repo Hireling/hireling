@@ -43,9 +43,7 @@ const nanData = {
 export class MessageTest {
   @AsyncTeardownFixture
   async teardownFixture() {
-    broker = new Broker(brokerCfg);
-
-    broker.start();
+    broker = new Broker(brokerCfg).start();
 
     await swait(broker.up);
 
@@ -58,9 +56,7 @@ export class MessageTest {
 
   @AsyncSetup
   async setup() {
-    broker = new Broker(brokerCfg);
-
-    broker.start();
+    broker = new Broker(brokerCfg).start();
 
     await swait(broker.up);
 
@@ -73,9 +69,11 @@ export class MessageTest {
 
   @AsyncTeardown
   async teardown() {
-    worker.stop();
+    if (worker.report.up) {
+      worker.stop(true);
 
-    await swait(worker.down);
+      await swait(worker.down);
+    }
 
     broker.stop();
 

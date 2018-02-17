@@ -11,9 +11,11 @@ let worker: Worker;
 export class WorkerTest {
   @AsyncTeardown
   async teardown() {
-    worker.stop();
+    if (worker.report.up) {
+      worker.stop(true);
 
-    await swait(worker.down);
+      await swait(worker.down);
+    }
   }
 
   @AsyncTest()
@@ -22,7 +24,7 @@ export class WorkerTest {
 
     await swait(worker.down);
 
-    Expect(worker.report.alive).toBe(false);
+    Expect(worker.report.up).toBe(false);
   }
 
   @AsyncTest()
@@ -33,9 +35,7 @@ export class WorkerTest {
 
     worker.stop();
 
-    await swait(worker.down);
-
-    Expect(worker.report.alive).toBe(false);
+    Expect(worker.report.up).toBe(false);
   }
 
   @AsyncTest()
@@ -50,9 +50,7 @@ export class WorkerTest {
 
     worker.stop();
 
-    await swait(worker.down);
-
-    Expect(worker.report.alive).toBe(false);
+    Expect(worker.report.up).toBe(false);
   }
 
   @AsyncTest()
@@ -63,8 +61,6 @@ export class WorkerTest {
 
     worker.stop(true);
 
-    await swait(worker.down);
-
-    Expect(worker.report.alive).toBe(false);
+    Expect(worker.report.up).toBe(false);
   }
 }
